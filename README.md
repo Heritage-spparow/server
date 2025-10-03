@@ -1,4 +1,4 @@
-# eCom Backend - Industry Standard E-commerce API
+# Heritage spparow Backend - Industry Standard E-commerce API
 
 A comprehensive, production-ready ecommerce backend built with Node.js, Express, and MongoDB. Features include authentication, product management, shopping cart, order processing, and more.
 
@@ -41,7 +41,7 @@ A comprehensive, production-ready ecommerce backend built with Node.js, Express,
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd eCom/server
+   cd Heritage spparow/server
    ```
 
 2. **Install dependencies**
@@ -80,13 +80,13 @@ A comprehensive, production-ready ecommerce backend built with Node.js, Express,
 
 2. **Start production server**
    ```bash
-   NODE_ENV=production pm2 start server.js --name ecom-backend
+   NODE_ENV=production pm2 start server.js --name Heritage spparow-backend
    ```
 
 3. **Monitor processes**
    ```bash
    pm2 status
-   pm2 logs ecom-backend
+   pm2 logs Heritage spparow-backend
    ```
 
 ## 🔧 Configuration
@@ -101,7 +101,7 @@ PORT=3000
 NODE_ENV=development
 
 # Database Configuration
-MONGO_URI=mongodb://localhost:27017/ecom
+MONGO_URI=mongodb://localhost:27017/Heritage spparow
 REDIS_URL=redis://localhost:6379
 
 # JWT Configuration
@@ -250,7 +250,7 @@ npm run seed
 This creates:
 - 3 sample users (including 1 admin)
 - 5 sample products with various categories
-- Admin credentials: `admin@ecom.com` / `admin123456`
+- Admin credentials: `admin@Heritage spparow.com` / `admin123456`
 
 ## 📊 Monitoring & Logging
 
@@ -287,7 +287,7 @@ Logs are stored in the `logs/` directory:
 npm install -g pm2
 
 # Start application
-NODE_ENV=production pm2 start server.js --name ecom-backend
+NODE_ENV=production pm2 start server.js --name Heritage spparow-backend
 
 # Auto-restart on system reboot
 pm2 startup
@@ -295,8 +295,8 @@ pm2 save
 
 # Monitor and manage
 pm2 status
-pm2 logs ecom-backend
-pm2 restart ecom-backend
+pm2 logs Heritage spparow-backend
+pm2 restart Heritage spparow-backend
 ```
 
 ## 🌍 Deployment Options
@@ -313,7 +313,7 @@ pm2 restart ecom-backend
 ```bash
 # 1. Clone repository on your server
 git clone <your-repo-url>
-cd eCom/server
+cd Heritage spparow/server
 
 # 2. Install dependencies
 npm install --production
@@ -326,7 +326,7 @@ cp .env.example .env
 npm install -g pm2
 
 # 5. Start application
-NODE_ENV=production pm2 start server.js --name ecom-backend
+NODE_ENV=production pm2 start server.js --name Heritage spparow-backend
 
 # 6. Set up auto-restart
 pm2 startup
