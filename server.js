@@ -17,16 +17,34 @@ const Redis = require('ioredis');
 const RedisStore = require('rate-limit-redis');
 const fs = require("fs");
 const path = require("path");
+
 // Route imports
 const authRoutes = require('./Routes/Auth');
 const productRoutes = require('./Routes/ProductsEnhanced');
 const cartRoutes = require('./Routes/Cart');
 const orderRoutes = require('./Routes/Order');
 const db = require('./connection/db');
-
+const adminRoutes = require('./Routes/Admin');
 
 console.log('1 Starting server...');
-const logDir = path.join(__dirname, "logs");
+
+// ======= FIXED logDir =======
+let logDir;
+if (process.env.NODE_ENV === 'production') {
+  // Writable directory for serverless or deployment
+  logDir = path.join("/tmp", "logs");
+} else {
+  logDir = path.join(__dirname, "logs");
+}
+
+// Ensure logDir exists (only if writable)
+try {
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+} catch (err) {
+  console.warn(`Cannot create log directory ${logDir}: ${err.message}`);
+}
+
+// ======= Logger setup =======
 const logger = winston.createLogger({
   level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
   format: winston.format.combine(
@@ -37,7 +55,7 @@ const logger = winston.createLogger({
   transports: [
     new winston.transports.File({ filename: path.join(logDir, "app.log") }),
     new DailyRotateFile({
-      filename: 'logs/combined-%DATE%.log',
+      filename: path.join(logDir, 'combined-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
       maxSize: '20m',
       maxFiles: '14d'
@@ -65,8 +83,6 @@ if (!process.env.MONGO_URI) {
   process.exit(1);
 }
 
-
-
 // Disable clustering for development
 const useCluster = process.env.NODE_ENV === 'production' && process.env.USE_CLUSTER === 'true';
 const numCPUs = os.cpus().length;
@@ -74,7 +90,6 @@ const numCPUs = os.cpus().length;
 if (useCluster && cluster.isMaster) {
   logger.info(`Master ${process.pid} is running`);
 
-  // Fork workers for each CPU core
   for (let i = 0; i < numCPUs; i++) {
     cluster.fork();
   }
@@ -89,12 +104,19 @@ if (useCluster && cluster.isMaster) {
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-  
+
   // Trust proxy for production deployment
   app.set('trust proxy', 1);
 
-  // CORS configuration - MUST BE FIRST
-  const baseOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://[::1]:3000', 'http://127.0.0.1:3000', 'http://localhost:5174', 'http://[::1]:5173'];
+  // CORS configuration
+  const baseOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://[::1]:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5174',
+    'http://[::1]:5173'
+  ];
   let allowedOrigins = new Set(baseOrigins);
 
   if (process.env.CLIENT_URL) {
@@ -104,28 +126,18 @@ if (useCluster && cluster.isMaster) {
   if (process.env.ALLOWED_ORIGINS) {
     process.env.ALLOWED_ORIGINS.split(',').forEach(origin => allowedOrigins.add(origin.trim()));
   }
-  allowedOrigins = Array.from(allowedOrigins);
 
-  // Log CORS configuration for debugging
+  allowedOrigins = Array.from(allowedOrigins);
   logger.info('Allowed Origins:', allowedOrigins);
 
-console.log('3 Starting server...');
+  console.log('3 Starting server...');
   app.use(cors({
     origin: function (origin, callback) {
       logger.debug('CORS Request from origin:', origin);
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        logger.debug('Allowing request with no origin');
-        return callback(null, true);
-      }
-      
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        logger.debug('Origin allowed:', origin);
-        callback(null, true);
-      } else {
-        logger.error('Blocked by CORS:', origin);
-        callback(new Error('Not allowed by CORS'));
-      }
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+      logger.error('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -139,30 +151,19 @@ console.log('3 Starting server...');
       'X-CSRF-Token'
     ],
     exposedHeaders: ['Content-Length', 'X-Requested-With'],
-    maxAge: 86400, // 24 hours
+    maxAge: 86400,
     optionsSuccessStatus: 200,
     preflightContinue: false,
   }));
 
-  
-  // // Handle preflight requests explicitly
-  // app.options('*', (req, res) => {
-  //   res.header('Access-Control-Allow-Origin', req.headers.origin);
-  //   res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  //   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
-  //   res.header('Access-Control-Allow-Credentials', 'true');
-  //   res.sendStatus(200);
-  // });
-console.log('4 Starting server...');
+  console.log('4 Starting server...');
   // Cookie parser
   app.use(cookieParser());
-
-
 
   // Compression middleware
   app.use(compression());
 
-  // Security middleware (after CORS)
+  // Security middleware
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -172,40 +173,33 @@ console.log('4 Starting server...');
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/"],
+        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173", "http://localhost:5174/"],
       },
     },
   }));
 
-  // Data sanitization against NoSQL query injection
+  // Data sanitization
   app.use(mongoSanitize({ allowDots: false, replaceWith: '_' }));
-
-  // Data sanitization against XSS
   app.use(xss());
 
   // Prevent parameter pollution
-  app.use(hpp({
-    whitelist: ['sort', 'fields', 'page', 'limit', 'category', 'price']
-  }));
+  app.use(hpp({ whitelist: ['sort', 'fields', 'page', 'limit', 'category', 'price'] }));
 
-  // Redis client for shared rate limiting across instances
+  // Redis client
   const redisClient = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
     retryStrategy(times) {
-      // Exponential backoff up to 2s
       return Math.min(times * 100, 2000);
     },
     maxRetriesPerRequest: 5,
     enableReadyCheck: true,
   });
 
-  redisClient.on('error', (err) => {
-    logger.error('Redis client error', { error: err.message });
-  });
+  redisClient.on('error', (err) => logger.error('Redis client error', { error: err.message }));
   redisClient.on('connect', () => logger.info('Redis client connecting...'));
   redisClient.on('ready', () => logger.info('Redis client ready'));
   redisClient.on('end', () => logger.warn('Redis client connection closed'));
 
-  // Rate limiting (applied after CORS) with Redis store
+  // Rate limiting
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -219,25 +213,19 @@ console.log('4 Starting server...');
   });
   app.use('/api', limiter);
 
-  // Speed limiter for repeated requests
+  // Speed limiter
   const speedLimiter = slowDown({
-    windowMs: 15 * 60 * 1000, 
+    windowMs: 15 * 60 * 1000,
     delayAfter: 50,
-    // express-slow-down v2: use a function for new behavior
     delayMs: () => 500,
-    skip: (req) => {
-     
-      return req.method === 'OPTIONS';
-    }
+    skip: (req) => req.method === 'OPTIONS'
   });
   app.use('/api', speedLimiter);
 
-  // Database connection for MongoDB
+  // Database connection
   async function initializeDatabase() {
     try {
-      if (typeof db.connect !== 'function') {
-        throw new Error('db.connect is not a function. Check ./connection/db.js implementation.');
-      }
+      if (typeof db.connect !== 'function') throw new Error('db.connect is not a function.');
       await db.connect(process.env.MONGO_URI);
       logger.info('MongoDB connection established');
     } catch (error) {
@@ -246,18 +234,14 @@ console.log('4 Starting server...');
     }
   }
 
-  // Initialize database
   initializeDatabase();
 
-  // API Routes
+  // Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/products', productRoutes);
   app.use('/api/cart', cartRoutes);
   app.use('/api/orders', orderRoutes);
   app.use('/api/products-enhanced', productRoutes);
-
-  // Admin routes
-  const adminRoutes = require('./Routes/Admin');
   app.use('/api/admin', adminRoutes);
 
   // API Documentation endpoint
@@ -266,75 +250,21 @@ console.log('4 Starting server...');
       message: 'Heritage spparow API v1.0',
       version: process.env.APP_VERSION || '1.0.0',
       environment: process.env.NODE_ENV || 'development',
-      endpoints: {
-        auth: '/api/auth',
-        products: '/api/products',
-        cart: '/api/cart',
-        orders: '/api/orders'
-      },
-      documentation: {
-        auth: {
-          register: 'POST /api/auth/register',
-          login: 'POST /api/auth/login',
-          profile: 'GET /api/auth/me',
-          updateProfile: 'PUT /api/auth/profile',
-          changePassword: 'PUT /api/auth/password'
-        },
-        products: {
-          getAll: 'GET /api/products',
-          getById: 'GET /api/products/:id',
-          create: 'POST /api/products (Admin)',
-          update: 'PUT /api/products/:id (Admin)',
-          delete: 'DELETE /api/products/:id (Admin)',
-          addReview: 'POST /api/products/:id/reviews',
-          featured: 'GET /api/products/featured',
-          topRated: 'GET /api/products/top/rated',
-          categories: 'GET /api/products/categories'
-        },
-        cart: {
-          get: 'GET /api/cart',
-          add: 'POST /api/cart/add',
-          update: 'PUT /api/cart/item/:itemId',
-          remove: 'DELETE /api/cart/item/:itemId',
-          clear: 'DELETE /api/cart/clear',
-          count: 'GET /api/cart/count'
-        },
-        orders: {
-          create: 'POST /api/orders',
-          getMyOrders: 'GET /api/orders/my',
-          getById: 'GET /api/orders/:id',
-          updateToPaid: 'PUT /api/orders/:id/pay',
-          cancel: 'PUT /api/orders/:id/cancel',
-          getAllOrders: 'GET /api/orders (Admin)',
-          updateStatus: 'PUT /api/orders/:id/status (Admin)'
-        }
-      }
     });
   });
 
-  // Health check endpoint
-  app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', uptime: process.uptime() });
-  });
+  // Health check
+  app.get('/health', (req, res) => res.status(200).json({ status: 'OK', uptime: process.uptime() }));
 
-  // CORS test endpoint
-  app.get('/api/test', (req, res) => {
-    res.status(200).json({ 
-      message: 'CORS test successful', 
-      origin: req.headers.origin,
-      timestamp: new Date().toISOString() 
-    });
-  });
+  // Test endpoint
+  app.get('/api/test', (req, res) => res.status(200).json({ message: 'CORS test successful', origin: req.headers.origin }));
 
   // Default route
-  app.get('/', (req, res) => {
-    res.send('This is the server of the app');
-  });
+  app.get('/', (req, res) => res.send('This is the server of the app'));
 
-  // Error handling middleware
+  // Error handling
   app.use((err, req, res, next) => {
     logger.error(`${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
-    // Log the full stack trace for debugging
     logger.error('Full stack trace:', err.stack);
     console.error('Full error details:', err);
     res.status(err.status || 500).json({
@@ -344,19 +274,14 @@ console.log('4 Starting server...');
   });
 
   // 404 handler
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' });
-  });
- 
+  app.use((req, res) => res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' }));
+
   const PORT = process.env.PORT || 3000;
 
   // Start server
-  const server = app.listen(PORT, () => {
-    logger.info(`Worker ${process.pid} started on http://localhost:${PORT}`);
-  });
+  const server = app.listen(PORT, () => logger.info(`Worker ${process.pid} started on http://localhost:${PORT}`));
 
   // Graceful shutdown
-  
   const shutdown = async (signal) => {
     try {
       logger.warn(`Received ${signal}. Starting graceful shutdown...`);
@@ -369,18 +294,14 @@ console.log('4 Starting server...');
           await db.connection.close(false);
           logger.info('MongoDB connection closed');
         }
-      } catch (e) {
-        logger.error('Error closing MongoDB connection', e);
-      }
+      } catch (e) { logger.error('Error closing MongoDB connection', e); }
 
       try {
         if (typeof redisClient?.quit === 'function') {
           await redisClient.quit();
           logger.info('Redis client closed');
         }
-      } catch (e) {
-        logger.error('Error closing Redis client', e);
-      }
+      } catch (e) { logger.error('Error closing Redis client', e); }
 
       process.exit(0);
     } catch (err) {
