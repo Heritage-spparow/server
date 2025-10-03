@@ -1,4 +1,4 @@
-# Heritage spparow Backend - Industry Standard E-commerce API
+# Heritage spparow Backend 
 
 A comprehensive, production-ready ecommerce backend built with Node.js, Express, and MongoDB. Features include authentication, product management, shopping cart, order processing, and more.
 
