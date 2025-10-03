@@ -15,7 +15,8 @@ const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
 const Redis = require('ioredis');
 const RedisStore = require('rate-limit-redis');
-
+const fs = require("fs");
+const path = require("path");
 // Route imports
 const authRoutes = require('./Routes/Auth');
 const productRoutes = require('./Routes/ProductsEnhanced');
@@ -25,7 +26,7 @@ const db = require('./connection/db');
 
 
 console.log('1 Starting server...');
-
+const logDir = path.join(__dirname, "logs");
 const logger = winston.createLogger({
   level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
   format: winston.format.combine(
@@ -34,7 +35,7 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+    new winston.transports.File({ filename: path.join(logDir, "app.log") }),
     new DailyRotateFile({
       filename: 'logs/combined-%DATE%.log',
       datePattern: 'YYYY-MM-DD',
