@@ -102,7 +102,7 @@ if (useCluster && cluster.isMaster) {
   app.set('trust proxy', 1);
 
   // CORS configuration - MUST BE FIRST
-  const baseOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://[::1]:3000', 'http://127.0.0.1:3000', 'http://localhost:5174', 'http://[::1]:5173'];
+  const baseOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://[::1]:3000', 'http://127.0.0.1:3000', 'http://localhost:5174', 'http://[::1]:5173' ,'https://heritage-spparow-client-git-main-ayushdev-a1s-projects.vercel.app'];
   let allowedOrigins = new Set(baseOrigins);
 
   if (process.env.CLIENT_URL) {
