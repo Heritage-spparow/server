@@ -129,7 +129,7 @@ router.get('/reports/sales', authorize('admin'), async (req, res) => {
     ]);
 
     res.json({ success: true, data });
-  } catch (err) {
+  } catch (err) { 
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 });

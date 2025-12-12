@@ -1,4 +1,5 @@
 const { configDotenv } = require('dotenv');
+configDotenv();
 const express = require('express');
 const cors = require('cors');
 const cluster = require('cluster');
@@ -14,7 +15,7 @@ const cookieParser = require('cookie-parser');
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
 const Redis = require('ioredis');
-const RedisStore = require('rate-limit-redis');
+const RedisStore = require('rate-limit-redis').default;
 const fs = require("fs");
 const path = require("path");
 // Route imports
@@ -58,7 +59,7 @@ const logger = winston.createLogger({
   transports
 });
 
-configDotenv();
+
 logger.info('Environment variables loaded');
 
 console.log('2 Starting server...');
@@ -116,7 +117,7 @@ if (useCluster && cluster.isMaster) {
   // Log CORS configuration for debugging
   logger.info('Allowed Origins:', allowedOrigins);
 
-console.log('3 Starting server...');
+console.log('3 Starting server...'); 
   app.use(cors({
     origin: function (origin, callback) {
       logger.debug('CORS Request from origin:', origin);
@@ -196,7 +197,7 @@ console.log('4 Starting server...');
   }));
 
   // Redis client for shared rate limiting across instances
-  const redisClient = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+  const redisClient = new Redis(process.env.REDIS_URL , {
     retryStrategy(times) {
       // Exponential backoff up to 2s
       return Math.min(times * 100, 2000);
@@ -213,17 +214,17 @@ console.log('4 Starting server...');
   redisClient.on('end', () => logger.warn('Redis client connection closed'));
 
   // Rate limiting (applied after CORS) with Redis store
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: 'Too many requests from this IP, please try again later.',
-    store: new RedisStore({
-      sendCommand: (...args) => redisClient.call(...args),
-    }),
-    skip: (req) => req.method === 'OPTIONS',
-  });
+ const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests from this IP, please try again later.',
+  store: new RedisStore({
+    sendCommand: (...args) => redisClient.call(...args),
+  }),
+  skip: (req) => req.method === 'OPTIONS',
+});
   app.use('/api', limiter);
 
   // Speed limiter for repeated requests
@@ -245,11 +246,11 @@ console.log('4 Starting server...');
       if (typeof db.connect !== 'function') {
         throw new Error('db.connect is not a function. Check ./connection/db.js implementation.');
       }
-      await db.connect(process.env.MONGO_URI);
+      await db.connect(process.env.MONGO_URI); 
       logger.info('MongoDB connection established');
     } catch (error) {
       logger.error('MongoDB connection failed:', error);
-      process.exit(1);
+      process.exit(1); 
     }
   }
 

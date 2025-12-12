@@ -69,7 +69,7 @@ router.post('/register', [
         role: user.role,
         isVerified: user.isVerified
       }
-    });
+    }); 
 
   } catch (error) {
     console.error(error);

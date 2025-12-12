@@ -4,13 +4,15 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "production": "NODE_ENV=production node server.js",
+    "dev": "npx concurrently -n \"SERVER,WORKER\" -c \"green,blue\" \"nodemon server.js\" \"nodemon workers/emailWorker.js\"",
+    "production": "NODE_ENV=production npx concurrently -n \"SERVER,WORKER\" -c \"green,blue\" \"node server.js\" \"node workers/emailWorker.js\"",
     "worker": "node workers/emailWorker.js",
     "dev:worker": "nodemon workers/emailWorker.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "seed": "node scripts/seedDatabase.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "health": "curl -s http://localhost:3000/health | json_pp",
+    "docs": "curl -s http://localhost:3000/api | json_pp"
   },
   "keywords": [],
   "author": "",
@@ -23,24 +25,28 @@
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "crypto": "^1.0.1",
     "dotenv": "^16.6.1",
     "ejs": "^3.1.10",
     "express": "^4.21.2",
     "express-mongo-sanitize": "^2.2.0",
-    "express-rate-limit": "6.11.2",
+    "express-rate-limit": "^7.5.1",
     "express-slow-down": "^2.0.1",
     "express-validator": "^7.0.1",
     "helmet": "^8.1.0",
     "hpp": "^0.2.3",
     "html-pdf": "^3.0.1",
-    "ioredis": "^5.7.0",
+    "ioredis": "^5.8.1",
     "jsonwebtoken": "^9.0.2",
     "juice": "^11.0.1",
     "mongoose": "^8.16.1",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.10.1",
     "path-to-regexp": "^8.2.0",
-    "rate-limit-redis": "^3.1.0",
+    "pdfkit": "^0.17.2",
+    "qrcode": "^1.5.4",
+    "rate-limit-redis": "^4.2.2",
+    "razorpay": "^2.9.6",
     "redis": "^4.6.13",
     "sharp": "^0.33.4",
     "stripe": "^15.8.0",
@@ -50,6 +56,7 @@
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
+    "concurrently": "^9.0.0",
     "nodemon": "^3.1.10"
   }
 }

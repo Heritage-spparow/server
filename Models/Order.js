@@ -44,6 +44,10 @@ const shippingAddressSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+ phone:{
+    type: String,
+    required: true
+ },
   state: String
 });
 
@@ -62,11 +66,11 @@ const orderSchema = new mongoose.Schema({
   },
   orderItems: [orderItemSchema],
   shippingAddress: shippingAddressSchema,
-  paymentMethod: {
+paymentMethod: {
     type: String,
+    enum: ["cod", "razorpay"],
     required: true,
-    enum: ['stripe', 'paypal', 'razorpay', 'cod']
-  },
+},
   paymentResult: paymentResultSchema,
   itemsPrice: {
     type: Number,
