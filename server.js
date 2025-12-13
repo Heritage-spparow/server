@@ -181,7 +181,8 @@ console.log('4 Starting server...');
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/" , "https://heritage-spparow-client.vercel.app"],
+        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/" ,
+           "https://heritage-spparow-client.vercel.app"],
       },
     },
   }));
