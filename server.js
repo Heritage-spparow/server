@@ -257,7 +257,7 @@ console.log('4 Starting server...');
   }
 
   // Initialize database
-  initializeDatabase();
+  await initializeDatabase();
 
   // API Routes
   app.use('/api/auth', authRoutes);
