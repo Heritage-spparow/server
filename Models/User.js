@@ -20,7 +20,7 @@ const addressSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  phone: { 
+  phone: {
     type: String,
     required: true
   },
@@ -68,12 +68,29 @@ const userSchema = new mongoose.Schema({
     trim: true,
     unique: true,
     lowercase: true,
-    index:true
+    index: true
   },
   password: {
     type: String,
-    required: true,
-    minlength: 6
+    minlength: 6,
+    required: function () {
+      return this.authProvider === 'local';
+    }
+  },
+  authProvider: {
+    type: String,
+    enum: ['local', 'google'],
+    default: 'local'
+  },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+
+  hasPassword: {
+    type: Boolean,
+    default: false
   },
   phone: {
     type: String,
@@ -139,17 +156,17 @@ const userSchema = new mongoose.Schema({
 });
 
 // Virtual for full name
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
 // Virtual for default address
-userSchema.virtual('defaultAddress').get(function() {
+userSchema.virtual('defaultAddress').get(function () {
   return this.addresses.find(address => address.isDefault) || this.addresses[0];
 });
 
 // Ensure only one default address
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   if (this.addresses && this.addresses.length > 0) {
     const defaultAddresses = this.addresses.filter(addr => addr.isDefault);
     if (defaultAddresses.length > 1) {
@@ -168,28 +185,29 @@ userSchema.pre('save', function(next) {
 });
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
+userSchema.pre('save', async function (next) {
+  if (!this.isModified('password') || !this.password) {
     return next();
   }
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
+  this.hasPassword = true;
   next();
 });
 
 // JWT Methods
-userSchema.methods.getSignedJwtToken = function() {
+userSchema.methods.getSignedJwtToken = function () {
   return jwt.sign({ id: this._id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE
   });
 };
 
-userSchema.methods.matchPassword = async function(enteredPassword) {
+userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
 // Add address method
-userSchema.methods.addAddress = function(addressData) {
+userSchema.methods.addAddress = function (addressData) {
   // If this is the first address, make it default
   if (this.addresses.length === 0) {
     addressData.isDefault = true;
@@ -199,7 +217,7 @@ userSchema.methods.addAddress = function(addressData) {
 };
 
 // Update address method
-userSchema.methods.updateAddress = function(addressId, updateData) {
+userSchema.methods.updateAddress = function (addressId, updateData) {
   const address = this.addresses.id(addressId);
   if (address) {
     Object.assign(address, updateData);
@@ -209,29 +227,29 @@ userSchema.methods.updateAddress = function(addressId, updateData) {
 };
 
 // Remove address method
-userSchema.methods.removeAddress = function(addressId) {
+userSchema.methods.removeAddress = function (addressId) {
   const address = this.addresses.id(addressId);
   if (address) {
     const wasDefault = address.isDefault;
     this.addresses.pull(addressId);
-    
+
     // If removed address was default and there are other addresses, make first one default
     if (wasDefault && this.addresses.length > 0) {
       this.addresses[0].isDefault = true;
     }
-    
+
     return this.save();
   }
   throw new Error('Address not found');
 };
 
 // Set default address method
-userSchema.methods.setDefaultAddress = function(addressId) {
+userSchema.methods.setDefaultAddress = function (addressId) {
   // First, make all addresses non-default
   this.addresses.forEach(addr => {
     addr.isDefault = false;
   });
-  
+
   // Then set the specified address as default
   const address = this.addresses.id(addressId);
   if (address) {
@@ -242,11 +260,11 @@ userSchema.methods.setDefaultAddress = function(addressId) {
 };
 
 // Account locking methods
-userSchema.virtual('isLocked').get(function() {
+userSchema.virtual('isLocked').get(function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });
 
-userSchema.methods.incLoginAttempts = function() {
+userSchema.methods.incLoginAttempts = function () {
   // If we have a previous lock that has expired, restart at 1
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
@@ -258,21 +276,21 @@ userSchema.methods.incLoginAttempts = function() {
       }
     });
   }
-  
+
   const updates = { $inc: { loginAttempts: 1 } };
-  
+
   // Lock account after 5 failed attempts for 2 hours
   if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
     updates.$set = {
       lockUntil: Date.now() + 2 * 60 * 60 * 1000 // 2 hours
     };
   }
-  
+
   return this.updateOne(updates);
 };
 
 // Reset login attempts
-userSchema.methods.resetLoginAttempts = function() {
+userSchema.methods.resetLoginAttempts = function () {
   return this.updateOne({
     $unset: {
       loginAttempts: 1,

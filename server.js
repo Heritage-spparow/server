@@ -25,6 +25,9 @@ const cartRoutes = require('./Routes/Cart');
 const orderRoutes = require('./Routes/Order');
 const adminRoutes = require('./Routes/Admin');
 const db = require('./connection/db');
+const passport = require('./config/passport');
+
+
 
 
 console.log('1 Starting server...');
@@ -73,7 +76,11 @@ if (!process.env.MONGO_URI) {
   logger.error('MONGO_URI environment variable is not set. Please ensure the .env file contains MONGO_URI.');
   process.exit(1);
 }
-
+// Add this check
+if (!process.env.API_BASE_URL) {
+  logger.error('API_BASE_URL environment variable is not set. This is required for Google OAuth callback.');
+  process.exit(1);
+}
 
 
 // Disable clustering for development
@@ -94,11 +101,15 @@ if (useCluster && cluster.isMaster) {
   });
 } else {
   const app = express();
-  let server; // Define server globally within the worker context
+  // Initialize Passport.js
+  app.use(passport.initialize());
+  let server; 
 
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  
   
   // Trust proxy for production deployment
   app.set('trust proxy', 1);
@@ -219,8 +230,8 @@ console.log('4 Starting server...');
   }),
   skip: (req) => req.method === 'OPTIONS',
 });
-  app.use('/api', limiter);
 
+  app.use('/api', limiter);
   // Speed limiter for repeated requests
   const speedLimiter = slowDown({
     windowMs: 15 * 60 * 1000, 
@@ -325,6 +336,7 @@ console.log('4 Starting server...');
                 profile: 'GET /api/auth/me',
                 updateProfile: 'PUT /api/auth/profile',
                 changePassword: 'PUT /api/auth/password'
+                
               },
               products: {
                 getAll: 'GET /api/products',
@@ -398,6 +410,7 @@ console.log('4 Starting server...');
 
         // Start server (listen) only after everything is ready
         server = app.listen(PORT, () => {
+          console.log(PORT)
           logger.info(`Worker ${process.pid} started on http://localhost:${PORT}`);
         });
 

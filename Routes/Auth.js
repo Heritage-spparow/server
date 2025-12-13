@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const User = require('../Models/User');
 const { protect, authorize } = require('../middleware/auth');
+const passport = require('passport');
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -78,8 +79,7 @@ router.post('/register', [
       message: 'Server error'
     });
   }
-});
-
+}); 
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
@@ -477,5 +477,42 @@ router.put('/password', protect, [
     });
   }
 });
+// @desc    Initiate Google OAuth
+// @route   GET /api/auth/google
+// @access  Public
+// NOTE: You would integrate your Google OAuth strategy (e.g., Passport.js) here.
+router.get(
+  '/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false
+  })
+);
+
+// @desc    Google OAuth Callback
+// @route   GET /api/auth/google/callback
+// @access  Public
+// NOTE: This route handles the response from Google.
+router.get(
+  '/google/callback',
+  passport.authenticate('google', {
+    session: false,
+    failureRedirect: `${process.env.CLIENT_URL}/login`
+  }),
+  (req, res) => {
+    const token = req.user.getSignedJwtToken();
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    });
+
+    res.redirect(process.env.CLIENT_URL);
+  }
+);
+
+
+console.log(process.env.CLIENT_URL);
 
 module.exports = router;
