@@ -18,11 +18,12 @@ const Redis = require('ioredis');
 const RedisStore = require('rate-limit-redis').default;
 const fs = require("fs");
 const path = require("path");
-// Route imports
+// Route imports - Keep these synchronous requires for now
 const authRoutes = require('./Routes/Auth');
 const productRoutes = require('./Routes/ProductsEnhanced');
 const cartRoutes = require('./Routes/Cart');
 const orderRoutes = require('./Routes/Order');
+const adminRoutes = require('./Routes/Admin');
 const db = require('./connection/db');
 
 
@@ -93,6 +94,7 @@ if (useCluster && cluster.isMaster) {
   });
 } else {
   const app = express();
+  let server; // Define server globally within the worker context
 
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
@@ -152,16 +154,6 @@ console.log('3 Starting server...');
     optionsSuccessStatus: 200,
     preflightContinue: false,
   }));
-
-  
-  // // Handle preflight requests explicitly
-  // app.options('*', (req, res) => {
-  //   res.header('Access-Control-Allow-Origin', req.headers.origin);
-  //   res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  //   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
-  //   res.header('Access-Control-Allow-Credentials', 'true');
-  //   res.sendStatus(200);
-  // });
 console.log('4 Starting server...');
   // Cookie parser
   app.use(cookieParser());
@@ -181,7 +173,8 @@ console.log('4 Starting server...');
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/" , "https://heritage-spparow-client.vercel.app"],
+        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/" ,
+           "https://heritage-spparow-client.vercel.app"],
       },
     },
   }));
@@ -247,135 +240,34 @@ console.log('4 Starting server...');
       if (typeof db.connect !== 'function') {
         throw new Error('db.connect is not a function. Check ./connection/db.js implementation.');
       }
+      // Added check to potentially prevent re-connecting in serverless environment
+      if (db.connection && db.connection.readyState === 1) {
+          logger.info('MongoDB connection already established (re-use)');
+          return;
+      }
       await db.connect(process.env.MONGO_URI); 
       logger.info('MongoDB connection established');
     } catch (error) {
       logger.error('MongoDB connection failed:', error);
-      process.exit(1); 
+      throw error; // Re-throw to be caught in startServer
     }
   }
 
-  // Initialize database
-  initializeDatabase();
-
-  // API Routes
-  app.use('/api/auth', authRoutes);
-  app.use('/api/products', productRoutes);
-  app.use('/api/cart', cartRoutes);
-  app.use('/api/orders', orderRoutes);
-  app.use('/api/products-enhanced', productRoutes);
-
-  // Admin routes
-  const adminRoutes = require('./Routes/Admin');
-  app.use('/api/admin', adminRoutes);
-
-  // API Documentation endpoint
-  app.get('/api', (req, res) => {
-    res.json({
-      message: 'Heritage spparow API v1.0',
-      version: process.env.APP_VERSION || '1.0.0',
-      environment: process.env.NODE_ENV || 'development',
-      endpoints: {
-        auth: '/api/auth',
-        products: '/api/products',
-        cart: '/api/cart',
-        orders: '/api/orders'
-      },
-      documentation: {
-        auth: {
-          register: 'POST /api/auth/register',
-          login: 'POST /api/auth/login',
-          profile: 'GET /api/auth/me',
-          updateProfile: 'PUT /api/auth/profile',
-          changePassword: 'PUT /api/auth/password'
-        },
-        products: {
-          getAll: 'GET /api/products',
-          getById: 'GET /api/products/:id',
-          create: 'POST /api/products (Admin)',
-          update: 'PUT /api/products/:id (Admin)',
-          delete: 'DELETE /api/products/:id (Admin)',
-          addReview: 'POST /api/products/:id/reviews',
-          featured: 'GET /api/products/featured',
-          topRated: 'GET /api/products/top/rated',
-          categories: 'GET /api/products/categories'
-        },
-        cart: {
-          get: 'GET /api/cart',
-          add: 'POST /api/cart/add',
-          update: 'PUT /api/cart/item/:itemId',
-          remove: 'DELETE /api/cart/item/:itemId',
-          clear: 'DELETE /api/cart/clear',
-          count: 'GET /api/cart/count'
-        },
-        orders: {
-          create: 'POST /api/orders',
-          getMyOrders: 'GET /api/orders/my',
-          getById: 'GET /api/orders/:id',
-          updateToPaid: 'PUT /api/orders/:id/pay',
-          cancel: 'PUT /api/orders/:id/cancel',
-          getAllOrders: 'GET /api/orders (Admin)',
-          updateStatus: 'PUT /api/orders/:id/status (Admin)'
-        }
-      }
-    });
-  });
-
-  // Health check endpoint
-  app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', uptime: process.uptime() });
-  });
-
-  // CORS test endpoint
-  app.get('/api/test', (req, res) => {
-    res.status(200).json({ 
-      message: 'CORS test successful', 
-      origin: req.headers.origin,
-      timestamp: new Date().toISOString() 
-    });
-  });
-
-  // Default route
-  app.get('/', (req, res) => {
-    res.send('This is the server of the app');
-  });
-
-  // Error handling middleware
-  app.use((err, req, res, next) => {
-    logger.error(`${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
-    // Log the full stack trace for debugging
-    logger.error('Full stack trace:', err.stack);
-    console.error('Full error details:', err);
-    res.status(err.status || 500).json({
-      error: 'Internal Server Error',
-      message: process.env.NODE_ENV === 'production' ? 'An error occurred' : err.message
-    });
-  });
-
-  // 404 handler
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' });
-  });
- 
-  const PORT = process.env.PORT || 3000;
-
-  // Start server
-  const server = app.listen(PORT, () => {
-    logger.info(`Worker ${process.pid} started on http://localhost:${PORT}`);
-  });
-
-  // Graceful shutdown
-  
+  // Graceful shutdown function
   const shutdown = async (signal) => {
     try {
       logger.warn(`Received ${signal}. Starting graceful shutdown...`);
 
-      await new Promise((resolve) => server.close(resolve));
-      logger.info('HTTP server closed');
+      if (server) {
+        await new Promise((resolve) => server.close(resolve));
+        logger.info('HTTP server closed');
+      }
 
       try {
         if (db.connection && db.connection.readyState !== 0) {
-          await db.connection.close(false);
+          // Setting force to false prevents Mongoose from issuing the close command immediately, 
+          // allowing existing operations to complete, which is good practice.
+          await db.connection.close(false); 
           logger.info('MongoDB connection closed');
         }
       } catch (e) {
@@ -398,6 +290,127 @@ console.log('4 Starting server...');
     }
   };
 
+
+  // New async function to handle initialization and server start
+  const startServer = async () => {
+    try {
+        
+        await initializeDatabase();
+
+        app.use('/api/auth', authRoutes);
+        app.use('/api/products', productRoutes);
+        app.use('/api/cart', cartRoutes);
+        app.use('/api/orders', orderRoutes);
+        app.use('/api/products-enhanced', productRoutes);
+
+        // Admin routes
+        app.use('/api/admin', adminRoutes);
+
+        // API Documentation endpoint
+        app.get('/api', (req, res) => {
+          res.json({
+            message: 'Heritage spparow API v1.0',
+            version: process.env.APP_VERSION || '1.0.0',
+            environment: process.env.NODE_ENV || 'development',
+            endpoints: {
+              auth: '/api/auth',
+              products: '/api/products',
+              cart: '/api/cart',
+              orders: '/api/orders'
+            },
+            documentation: {
+              auth: {
+                register: 'POST /api/auth/register',
+                login: 'POST /api/auth/login',
+                profile: 'GET /api/auth/me',
+                updateProfile: 'PUT /api/auth/profile',
+                changePassword: 'PUT /api/auth/password'
+              },
+              products: {
+                getAll: 'GET /api/products',
+                getById: 'GET /api/products/:id',
+                create: 'POST /api/products (Admin)',
+                update: 'PUT /api/products/:id (Admin)',
+                delete: 'DELETE /api/products/:id (Admin)',
+                addReview: 'POST /api/products/:id/reviews',
+                featured: 'GET /api/products/featured',
+                topRated: 'GET /api/products/top/rated',
+                categories: 'GET /api/products/categories'
+              },
+              cart: {
+                get: 'GET /api/cart',
+                add: 'POST /api/cart/add',
+                update: 'PUT /api/cart/item/:itemId',
+                remove: 'DELETE /api/cart/item/:itemId',
+                clear: 'DELETE /api/cart/clear',
+                count: 'GET /api/cart/count'
+              },
+              orders: {
+                create: 'POST /api/orders',
+                getMyOrders: 'GET /api/orders/my',
+                getById: 'GET /api/orders/:id',
+                updateToPaid: 'PUT /api/orders/:id/pay',
+                cancel: 'PUT /api/orders/:id/cancel',
+                getAllOrders: 'GET /api/orders (Admin)',
+                updateStatus: 'PUT /api/orders/:id/status (Admin)'
+              }
+            }
+          });
+        });
+
+        // Health check endpoint
+        app.get('/health', (req, res) => {
+          res.status(200).json({ status: 'OK', uptime: process.uptime() });
+        });
+
+        // CORS test endpoint
+        app.get('/api/test', (req, res) => {
+          res.status(200).json({ 
+            message: 'CORS test successful', 
+            origin: req.headers.origin,
+            timestamp: new Date().toISOString() 
+          });
+        });
+
+        // Default route
+        app.get('/', (req, res) => {
+          res.send('This is the server of the app');
+        });
+
+        // Error handling middleware
+        app.use((err, req, res, next) => {
+          logger.error(`${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
+          // Log the full stack trace for debugging
+          logger.error('Full stack trace:', err.stack);
+          console.error('Full error details:', err);
+          res.status(err.status || 500).json({
+            error: 'Internal Server Error',
+            message: process.env.NODE_ENV === 'production' ? 'An error occurred' : err.message
+          });
+        });
+
+        // 404 handler
+        app.use((req, res) => {
+          res.status(404).json({ error: 'Not Found', message: 'The requested resource was not found' });
+        });
+      
+        const PORT = process.env.PORT || 3000;
+
+        // Start server (listen) only after everything is ready
+        server = app.listen(PORT, () => {
+          logger.info(`Worker ${process.pid} started on http://localhost:${PORT}`);
+        });
+
+    } catch (error) {
+      logger.error('Failed to start server due to initialization error. Exiting.', error);
+      process.exit(1);
+    }
+  };
+
+  // Execute the start function
+  startServer();
+
+  // Attach shutdown handlers
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
