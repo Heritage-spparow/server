@@ -102,7 +102,8 @@ if (useCluster && cluster.isMaster) {
   app.set('trust proxy', 1);
 
   // CORS configuration - MUST BE FIRST
-  const baseOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://[::1]:3000', 'http://127.0.0.1:3000', 'http://localhost:5174', 'http://[::1]:5173' ,'https://heritage-spparow-client-git-main-ayushdev-a1s-projects.vercel.app'];
+  const baseOrigins = ['http://localhost:5173', 'http://localhost:3000', 'http://[::1]:3000', 'http://127.0.0.1:3000', 'http://localhost:5174', 'http://[::1]:5173' ,
+    'https://heritage-spparow-client-git-main-ayushdev-a1s-projects.vercel.app' , 'https://heritage-spparow-client.vercel.app'];
   let allowedOrigins = new Set(baseOrigins);
 
   if (process.env.CLIENT_URL) {
@@ -180,7 +181,7 @@ console.log('4 Starting server...');
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/"],
+        connectSrc: ["'self'", "http://localhost:3000", "http://localhost:5173" ,"http://localhost:5174/" , "https://heritage-spparow-client.vercel.app"],
       },
     },
   }));
