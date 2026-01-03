@@ -500,6 +500,11 @@ router.get(
     failureRedirect: `${process.env.CLIENT_URL}/login`
   }),
   (req, res) => {
+    if (!req.user) {
+      console.error('❌ No user in request after Google auth');
+      return res.redirect(`${process.env.CLIENT_URL}/login`);
+    }
+
     const token = req.user.getSignedJwtToken();
 
     res.cookie('token', token, {
@@ -508,11 +513,7 @@ router.get(
       sameSite: 'lax'
     });
 
-    res.redirect(process.env.CLIENT_URL);
+    return res.redirect(process.env.CLIENT_URL);
   }
 );
-
-
-console.log(process.env.CLIENT_URL);
-
 module.exports = router;

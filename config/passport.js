@@ -1,21 +1,26 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../Models/User');
-console.log('✅ Passport Google Strategy Loaded');
+
 passport.use(
   new GoogleStrategy(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.API_BASE_URL}/api/auth/google/callback`
+      callbackURL: `${process.env.API_BASE_URL}/api/auth/google/callback`,
+      passReqToCallback: true
     },
-    async (_, __, profile, done) => {
+    async (req, accessToken, refreshToken, profile, done) => {
       try {
-        const email = profile.emails[0].value;
+        const email = profile.emails?.[0]?.value;
+
+        if (!email) {
+          return done(new Error('No email found in Google profile'), null);
+        }
+
         let user = await User.findOne({ email });
 
         if (user) {
-         
           if (!user.googleId) {
             user.googleId = profile.id;
             user.authProvider = 'google';
@@ -23,7 +28,6 @@ passport.use(
             await user.save();
           }
         } else {
-          // New Google user
           user = await User.create({
             googleId: profile.id,
             authProvider: 'google',
@@ -34,9 +38,9 @@ passport.use(
           });
         }
 
-        done(null, user);
+        return done(null, user);
       } catch (err) {
-        done(err, null);
+        return done(err, null);
       }
     }
   )
