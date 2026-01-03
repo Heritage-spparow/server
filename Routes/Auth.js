@@ -485,7 +485,7 @@ router.get(
   '/google',
   passport.authenticate('google', {
     scope: ['profile', 'email'],
-    session: false
+    prompt: 'consent'
   })
 );
 
@@ -501,7 +501,7 @@ router.get(
   }),
   (req, res) => {
     if (!req.user) {
-      console.error('❌ No user in request after Google auth');
+      console.error('No user in request after Google auth');
       return res.redirect(`${process.env.CLIENT_URL}/login`);
     }
 
