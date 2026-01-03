@@ -510,7 +510,7 @@ router.get(
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax'
+      sameSite: 'none',
     });
 
     return res.redirect(process.env.CLIENT_URL);
