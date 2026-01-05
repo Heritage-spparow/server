@@ -56,21 +56,21 @@ router.post('/register', [
     };
 
     res.status(201)
-       .cookie('token', token, cookieOptions)
-       .json({
-      success: true, 
-      token,
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isVerified: user.isVerified
-      }
-    }); 
+      .cookie('token', token, cookieOptions)
+      .json({
+        success: true,
+        token,
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified
+        }
+      });
 
   } catch (error) {
     console.error(error);
@@ -79,7 +79,7 @@ router.post('/register', [
       message: 'Server error'
     });
   }
-}); 
+});
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
@@ -154,23 +154,23 @@ router.post('/login', [
     };
 
     res.status(200)
-       .cookie('token', token, cookieOptions)
-       .json({
-      success: true,
-      token,
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isVerified: user.isVerified,
-        lastLogin: user.lastLogin,
-        defaultAddress: user.defaultAddress
-      }
-    });
+      .cookie('token', token, cookieOptions)
+      .json({
+        success: true,
+        token,
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          lastLogin: user.lastLogin,
+          defaultAddress: user.defaultAddress
+        }
+      });
 
   } catch (error) {
     console.error(error);
@@ -189,7 +189,7 @@ router.post('/logout', (req, res) => {
     expires: new Date(Date.now() + 10 * 1000),
     httpOnly: true
   });
-  
+
   res.status(200).json({
     success: true,
     message: 'User logged out successfully'
@@ -253,12 +253,12 @@ router.put('/profile', protect, [
 
     const { firstName, lastName, email, phone, dateOfBirth, gender, preferences } = req.body;
     const fieldsToUpdate = {};
-    
+
     if (firstName) fieldsToUpdate.firstName = firstName;
     if (lastName) fieldsToUpdate.lastName = lastName;
     if (email) fieldsToUpdate.email = email;
     if (phone) fieldsToUpdate.phone = phone;
-    if (dateOfBirth) fieldsToUpdate.dateOfBirth = dateOfBirth; 
+    if (dateOfBirth) fieldsToUpdate.dateOfBirth = dateOfBirth;
     if (gender) fieldsToUpdate.gender = gender;
     if (preferences) fieldsToUpdate.preferences = { ...fieldsToUpdate.preferences, ...preferences };
 
@@ -290,7 +290,7 @@ router.put('/profile', protect, [
         message: 'Email already exists'
       });
     }
-res.status(500).json({
+    res.status(500).json({
       success: false,
       message: 'Server error'
     });
@@ -501,19 +501,16 @@ router.get(
   }),
   (req, res) => {
     if (!req.user) {
-      console.error('No user in request after Google auth');
       return res.redirect(`${process.env.CLIENT_URL}/login`);
     }
 
     const token = req.user.getSignedJwtToken();
-
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
     });
-
-    return res.redirect(process.env.CLIENT_URL);
+    return res.redirect(`${process.env.CLIENT_URL}/?token=${token}`); 
   }
 );
 module.exports = router;

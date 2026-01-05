@@ -11,7 +11,7 @@ const { protect } = require('../middleware/auth');
 router.get('/', protect, async (req, res) => {
   try {
     let cart = await Cart.findOne({ user: req.user._id }).populate('items.product');
-    
+
     if (!cart) {
       cart = new Cart({ user: req.user._id, items: [] });
       await cart.save();
@@ -34,63 +34,39 @@ router.get('/', protect, async (req, res) => {
 // @desc    Add item to cart
 // @route   POST /api/cart/add
 // @access  Private
-router.post('/add', protect, [
-  body('productId').notEmpty().withMessage('Product ID is required'),
-  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive integer')
-], async (req, res) => {
+// server/Routes/Cart.js
+
+router.post("/add", protect, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
+    const { productId, size, quantity = 1 } = req.body; //
+
+    if (!productId || !size) {
+      return res.status(400).json({ success: false, message: "Product and size are required" });
     }
 
-    const { productId, quantity, color, size } = req.body;
-
-    // Check if product exists and is active
-    const product = await Product.findById(productId);
-    if (!product || !product.active) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found or inactive'
-      });
-    }
-
-    // Check stock availability
-    if (product.stock < quantity) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient stock available'
-      });
-    }
-
-    // Find or create cart
     let cart = await Cart.findOne({ user: req.user._id });
+
     if (!cart) {
       cart = new Cart({ user: req.user._id, items: [] });
     }
 
-    // Add item to cart
-    cart.addItem(productId, quantity, color, size);
-    await cart.save();
+    // Merging logic:
+    const existingItem = cart.items.find(item =>
+      item.product.toString() === productId && item.size === size
+    );
 
-    // Populate and return updated cart
+    if (existingItem) {
+      existingItem.quantity += quantity;
+    } else {
+      cart.items.push({ product: productId, size, quantity });
+    }
+
+    await cart.save();
     await cart.populate('items.product');
 
-    res.status(200).json({
-      success: true,
-      message: 'Item added to cart',
-      cart
-    });
-
+    res.status(200).json({ success: true, cart });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
@@ -139,6 +115,9 @@ router.put('/item/:itemId', protect, [
     cart.updateItemQuantity(itemId, quantity);
     await cart.save();
 
+    // 🔥 FIX: populate before sending response
+    await cart.populate('items.product');
+
     res.status(200).json({
       success: true,
       message: 'Cart updated',
@@ -157,9 +136,16 @@ router.put('/item/:itemId', protect, [
 // @desc    Remove item from cart
 // @route   DELETE /api/cart/item/:itemId
 // @access  Private
-router.delete('/item/:itemId', protect, async (req, res) => {
+router.delete('/item', protect, async (req, res) => {
   try {
-    const { itemId } = req.params;
+    const { productId, size } = req.query;
+
+    if (!productId) {
+      return res.status(400).json({
+        success: false,
+        message: 'productId is required'
+      });
+    }
 
     const cart = await Cart.findOne({ user: req.user._id });
     if (!cart) {
@@ -169,17 +155,32 @@ router.delete('/item/:itemId', protect, async (req, res) => {
       });
     }
 
-    cart.removeItem(itemId);
+    const initialLength = cart.items.length;
+
+    cart.items = cart.items.filter(
+      item =>
+        item.product.toString() !== productId ||
+        item.size !== size
+    );
+
+    if (cart.items.length === initialLength) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found in cart'
+      });
+    }
+
     await cart.save();
     await cart.populate('items.product');
 
     res.status(200).json({
       success: true,
-      message: 'Item removed from cart',
+      message: 'Item removed',
       cart
     });
 
   } catch (error) {
+    console.error('DELETE CART ITEM ERROR:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -187,6 +188,8 @@ router.delete('/item/:itemId', protect, async (req, res) => {
     });
   }
 });
+
+
 
 // @desc    Clear cart
 // @route   DELETE /api/cart/clear

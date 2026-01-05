@@ -12,9 +12,7 @@ const cartItemSchema = new mongoose.Schema({
     min: 1,
     default: 1
   },
-  color: {
-    type: String
-  },
+
   size: {
     type: String
   },
@@ -51,25 +49,39 @@ const cartSchema = new mongoose.Schema({
 });
 
 // Calculate totals before saving
-cartSchema.pre('save', async function(next) {
-  await this.populate({ path: 'items.product', select: 'price discountPrice' });
-  
-  this.totalItems = this.items.reduce((total, item) => total + item.quantity, 0);
-  this.totalPrice = this.items.reduce((total, item) => {
-    const price = item.product?.discountPrice || item.product?.price || 0;
-    return total + (price * item.quantity);
+cartSchema.pre('save', async function (next) {
+  const map = new Map();
+
+  for (const item of this.items) {
+    const key = `${item.product}_${item.size || 'NOSIZE'}`;
+
+    if (map.has(key)) {
+      map.get(key).quantity += item.quantity;
+    } else {
+      map.set(key, item);
+    }
+  }
+
+  this.items = Array.from(map.values());
+
+  await this.populate({ path: 'items.product', select: 'price discountPrice stock' });
+
+  this.totalItems = this.items.reduce((t, i) => t + i.quantity, 0);
+  this.totalPrice = this.items.reduce((t, i) => {
+    const price = i.product.discountPrice || i.product.price || 0;
+    return t + price * i.quantity;
   }, 0);
-  
+
   this.updatedAt = Date.now();
   next();
 });
 
 // Method to add item to cart
-cartSchema.methods.addItem = function(productId, quantity = 1, color, size) {
-  const existingItem = this.items.find(item => 
-    item.product.toString() === productId.toString() &&
-    item.color === color &&
-    item.size === size
+cartSchema.methods.addItem = function (productId, quantity = 1, size) {
+  const existingItem = this.items.find(
+    (item) =>
+      item.product.toString() === productId.toString() &&
+      item.size === size
   );
 
   if (existingItem) {
@@ -78,8 +90,7 @@ cartSchema.methods.addItem = function(productId, quantity = 1, color, size) {
     this.items.push({
       product: productId,
       quantity,
-      color,
-      size
+      size,
     });
   }
 };

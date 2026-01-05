@@ -113,8 +113,8 @@ if (useCluster && cluster.isMaster) {
 
 
   // Body parsing middleware
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 
 
@@ -327,6 +327,8 @@ if (useCluster && cluster.isMaster) {
       app.use('/api/cart', cartRoutes);
       app.use('/api/orders', orderRoutes);
       app.use('/api/products-enhanced', productRoutes);
+
+      
 
       // Admin routes
       app.use('/api/admin', adminRoutes);
