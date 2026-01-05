@@ -1,34 +1,52 @@
 const Redis = require("ioredis");
 
-let redis = null;
+let client = null;
+let isReady = false;
 
 function getRedis() {
-  if (redis) return redis;
+  if (client && isReady) return client;
 
-  const isTLS = process.env.REDIS_URL?.startsWith("rediss://");
+  if (!client) {
+    const isTLS = process.env.REDIS_URL?.startsWith("rediss://");
 
-  redis = new Redis(process.env.REDIS_URL, {
-    ...(isTLS && { tls: {} }),
-    lazyConnect: true,
-    connectTimeout: 3000,
-    maxRetriesPerRequest: 1,
-    enableOfflineQueue: false,
-  });
+    client = new Redis(process.env.REDIS_URL, {
+      ...(isTLS && { tls: {} }),
+      lazyConnect: true,
+      connectTimeout: 3000,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
 
-  redis.on("connect", () => {
-    console.log("✅ Redis connected");
-  });
+    client.on("connect", () => {
+      console.log("🟡 Redis connecting...");
+    });
 
-  redis.on("error", (err) => {
-    console.warn("⚠️ Redis error:", err.message);
-  });
+    client.on("ready", () => {
+      isReady = true;
+      console.log("✅ Redis ready");
+    });
 
-  redis.connect().catch(() => {
-    console.warn("⚠️ Redis unavailable, caching disabled");
-    redis = null;
-  });
+    client.on("error", (err) => {
+      console.warn("⚠️ Redis error:", err.message);
+      isReady = false;
+    });
 
-  return redis;
+    client.on("end", () => {
+      console.warn("⚠️ Redis connection closed");
+      isReady = false;
+    });
+
+    client.connect().catch(() => {
+      console.warn("⚠️ Redis unavailable, caching disabled");
+      client = null;
+      isReady = false;
+    });
+  }
+
+  // 🔴 KEY LINE
+  if (!isReady) return null;
+
+  return client;
 }
 
 module.exports = getRedis;

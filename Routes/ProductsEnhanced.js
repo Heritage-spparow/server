@@ -2,45 +2,43 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const Product = require("../Models/Product");
-const { protect, authorize } = require("../middleware/auth");
+const getRedis = require("../utils/redis");
 const upload = require("../middleware/upload");
-const redis = require("../utils/redis");
+const { protect, authorize } = require("../middleware/auth");
+
 /* =====================================================
    GET CATEGORIES
    GET /api/products-enhanced/categories
 ===================================================== */
 router.get("/categories", async (req, res) => {
   try {
+    const redis = getRedis();
     const cacheKey = "product_categories";
 
-    /* ---------- 1️⃣ CHECK CACHE ---------- */
-    const cachedCategories = await redis.get(cacheKey);
-    if (cachedCategories) {
-      return res.status(200).json({
-        success: true,
-        categories: JSON.parse(cachedCategories),
-        cached: true,
-      });
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          categories: JSON.parse(cached),
+          cached: true,
+        });
+      }
     }
-    const categories = await Product.distinct("category", {
-      active: true,
-    });
 
-    await redis.setex(cacheKey, 600, JSON.stringify(categories));
+    const categories = await Product.distinct("category", { active: true });
 
-    res.status(200).json({
-      success: true,
-      categories,
-      cached: false,
-    });
-  } catch (error) {
-    console.error("❌ Categories fetch error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    if (redis) {
+      await redis.setex(cacheKey, 600, JSON.stringify(categories));
+    }
+
+    res.json({ success: true, categories, cached: false });
+  } catch (err) {
+    console.error("❌ Categories error:", err);
+    res.status(500).json({ success: false });
   }
 });
+
 
 /* =====================================================
    GET FEATURED PRODUCTS
@@ -80,62 +78,47 @@ router.get("/featured", async (req, res) => {
 ===================================================== */
 router.get("/", async (req, res) => {
   try {
+    const redis = getRedis();
+
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
     const cacheKey = `products:${JSON.stringify(req.query)}`;
-    const cachedData = await redis.get(cacheKey);
-    if (cachedData) {
-      return res.status(200).json({
-        success: true,
-        ...JSON.parse(cachedData),
-        cached: true,
-      });
+
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          ...JSON.parse(cached),
+          cached: true,
+        });
+      }
     }
 
-    let query = Product.find({ active: true });
+    const filter = { active: true };
 
-    if (req.query.category) {
-      query = query.where("category").equals(req.query.category);
-    }
-
-    if (req.query.minPrice || req.query.maxPrice) {
-      query = query.where("price");
-      if (req.query.minPrice) query = query.gte(Number(req.query.minPrice));
-      if (req.query.maxPrice) query = query.lte(Number(req.query.maxPrice));
-    }
+    if (req.query.category) filter.category = req.query.category;
 
     if (req.query.search) {
-      const keyword = req.query.search.trim();
-      query = query.find({
-        $or: [
-          { name: { $regex: keyword, $options: "i" } },
-          { category: { $regex: keyword, $options: "i" } },
-          { collection: { $regex: keyword, $options: "i" } },
-          { description: { $regex: keyword, $options: "i" } },
-        ],
-      });
-    }
-    let sortBy = "-createdAt";
-    if (req.query.sortBy) {
-      const sortOptions = {
-        "price-asc": "price",
-        "price-desc": "-price",
-        newest: "-createdAt",
-        oldest: "createdAt",
-        name: "name",
-      };
-      sortBy = sortOptions[req.query.sortBy] || sortBy;
+      const q = req.query.search.trim();
+      filter.$or = [
+        { name: { $regex: q, $options: "i" } },
+        { category: { $regex: q, $options: "i" } },
+        { description: { $regex: q, $options: "i" } },
+      ];
     }
 
-    query = query.sort(sortBy);
+    const products = await Product.find(filter)
+      .skip(skip)
+      .limit(limit)
+      .sort("-createdAt")
+      .lean();
 
-    /* ---------- 3️⃣ EXECUTE QUERY ---------- */
-    const products = await query.skip(skip).limit(limit).lean();
-    const total = await Product.countDocuments(query.getQuery());
+    const total = await Product.countDocuments(filter);
 
-    const responseData = {
+    const response = {
       products,
       pagination: {
         currentPage: page,
@@ -144,19 +127,14 @@ router.get("/", async (req, res) => {
       },
     };
 
-    await redis.setex(cacheKey, 600, JSON.stringify(responseData));
+    if (redis) {
+      await redis.setex(cacheKey, 300, JSON.stringify(response));
+    }
 
-    res.status(200).json({
-      success: true,
-      ...responseData,
-      cached: false,
-    });
-  } catch (error) {
-    console.error("❌ Products fetch error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    res.json({ success: true, ...response, cached: false });
+  } catch (err) {
+    console.error("❌ Products fetch error:", err);
+    res.status(500).json({ success: false });
   }
 });
 
@@ -167,54 +145,34 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    /* ---------- 1️⃣ VALIDATE OBJECT ID ---------- */
     if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product ID",
-      });
+      return res.status(400).json({ success: false });
     }
 
+    const redis = getRedis();
     const cacheKey = `product:${id}`;
 
-    /* ---------- 2️⃣ CHECK CACHE ---------- */
-    const cachedProduct = await redis.get(cacheKey);
-    if (cachedProduct) {
-      return res.status(200).json({
-        success: true,
-        product: JSON.parse(cachedProduct),
-        cached: true,
-      });
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          product: JSON.parse(cached),
+          cached: true,
+        });
+      }
     }
 
-    /* ---------- 3️⃣ FETCH FROM DATABASE ---------- */
-    const product = await Product.findOne({
-      _id: id,
-      active: true,
-    }).lean();
+    const product = await Product.findOne({ _id: id, active: true }).lean();
+    if (!product) return res.status(404).json({ success: false });
 
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
+    if (redis) {
+      await redis.setex(cacheKey, 300, JSON.stringify(product));
     }
 
-    /* ---------- 4️⃣ SAVE TO CACHE (5 MIN) ---------- */
-    await redis.setex(cacheKey, 300, JSON.stringify(product));
-
-    res.status(200).json({
-      success: true,
-      product,
-      cached: false,
-    });
-  } catch (error) {
-    console.error("❌ Single product fetch error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    res.json({ success: true, product, cached: false });
+  } catch (err) {
+    res.status(500).json({ success: false });
   }
 });
 
