@@ -4,20 +4,37 @@ const mongoose = require("mongoose");
 const Product = require("../Models/Product");
 const { protect, authorize } = require("../middleware/auth");
 const upload = require("../middleware/upload");
-
+const redis = require("../utils/redis");
 /* =====================================================
    GET CATEGORIES
    GET /api/products-enhanced/categories
 ===================================================== */
 router.get("/categories", async (req, res) => {
   try {
-    const categories = await Product.distinct("category", { active: true });
+    const cacheKey = "product_categories";
+
+    /* ---------- 1️⃣ CHECK CACHE ---------- */
+    const cachedCategories = await redis.get(cacheKey);
+    if (cachedCategories) {
+      return res.status(200).json({
+        success: true,
+        categories: JSON.parse(cachedCategories),
+        cached: true,
+      });
+    }
+    const categories = await Product.distinct("category", {
+      active: true,
+    });
+
+    await redis.setex(cacheKey, 600, JSON.stringify(categories));
+
     res.status(200).json({
       success: true,
-      categories: categories || [],
+      categories,
+      cached: false,
     });
   } catch (error) {
-    console.error("Error in /categories:", error);
+    console.error("❌ Categories fetch error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -67,26 +84,28 @@ router.get("/", async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
+    const cacheKey = `products:${JSON.stringify(req.query)}`;
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        ...JSON.parse(cachedData),
+        cached: true,
+      });
+    }
+
     let query = Product.find({ active: true });
 
-    /* ---------- CATEGORY FILTER ---------- */
     if (req.query.category) {
       query = query.where("category").equals(req.query.category);
     }
 
-    /* ---------- PRICE FILTER ---------- */
     if (req.query.minPrice || req.query.maxPrice) {
       query = query.where("price");
       if (req.query.minPrice) query = query.gte(Number(req.query.minPrice));
       if (req.query.maxPrice) query = query.lte(Number(req.query.maxPrice));
     }
 
-    /* ---------- FEATURED FILTER ---------- */
-    if (req.query.featured) {
-      query = query.where("featured").equals(req.query.featured === "true");
-    }
-
-    /* ---------- 🔥 SAFE SEARCH (NO $text) ---------- */
     if (req.query.search) {
       const keyword = req.query.search.trim();
       query = query.find({
@@ -98,37 +117,42 @@ router.get("/", async (req, res) => {
         ],
       });
     }
-
-    /* ---------- SORTING ---------- */
     let sortBy = "-createdAt";
     if (req.query.sortBy) {
       const sortOptions = {
         "price-asc": "price",
         "price-desc": "-price",
-        name: "name",
         newest: "-createdAt",
         oldest: "createdAt",
+        name: "name",
       };
       sortBy = sortOptions[req.query.sortBy] || sortBy;
     }
 
     query = query.sort(sortBy);
 
-    /* ---------- EXECUTE QUERY ---------- */
+    /* ---------- 3️⃣ EXECUTE QUERY ---------- */
     const products = await query.skip(skip).limit(limit).lean();
     const total = await Product.countDocuments(query.getQuery());
 
-    res.status(200).json({
-      success: true,
+    const responseData = {
       products,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(total / limit),
         totalItems: total,
       },
+    };
+
+    await redis.setex(cacheKey, 600, JSON.stringify(responseData));
+
+    res.status(200).json({
+      success: true,
+      ...responseData,
+      cached: false,
     });
   } catch (error) {
-    console.error("Error in GET /api/products-enhanced:", error);
+    console.error("❌ Products fetch error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -136,21 +160,39 @@ router.get("/", async (req, res) => {
   }
 });
 
-
 /* =====================================================
    GET SINGLE PRODUCT
    GET /api/products-enhanced/:id
 ===================================================== */
 router.get("/:id", async (req, res) => {
   try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
+    const { id } = req.params;
+
+    /* ---------- 1️⃣ VALIDATE OBJECT ID ---------- */
+    if (!mongoose.isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid product ID",
       });
     }
 
-    const product = await Product.findById(req.params.id).lean();
+    const cacheKey = `product:${id}`;
+
+    /* ---------- 2️⃣ CHECK CACHE ---------- */
+    const cachedProduct = await redis.get(cacheKey);
+    if (cachedProduct) {
+      return res.status(200).json({
+        success: true,
+        product: JSON.parse(cachedProduct),
+        cached: true,
+      });
+    }
+
+    /* ---------- 3️⃣ FETCH FROM DATABASE ---------- */
+    const product = await Product.findOne({
+      _id: id,
+      active: true,
+    }).lean();
 
     if (!product) {
       return res.status(404).json({
@@ -159,12 +201,16 @@ router.get("/:id", async (req, res) => {
       });
     }
 
+    /* ---------- 4️⃣ SAVE TO CACHE (5 MIN) ---------- */
+    await redis.setex(cacheKey, 300, JSON.stringify(product));
+
     res.status(200).json({
       success: true,
       product,
+      cached: false,
     });
   } catch (error) {
-    console.error("Error in GET /products/:id:", error);
+    console.error("❌ Single product fetch error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -176,13 +222,17 @@ router.get("/:id", async (req, res) => {
    CREATE PRODUCT (ADMIN)
    POST /api/products-enhanced
 ===================================================== */
+/* =====================================================
+   CREATE PRODUCT (ADMIN)
+   POST /api/products-enhanced
+===================================================== */
 router.post(
   "/",
   protect,
   authorize("admin"),
   upload.fields([
     { name: "coverImage", maxCount: 1 },
-    { name: "galleryImages", maxCount: 20},
+    { name: "galleryImages", maxCount: 20 },
   ]),
   async (req, res) => {
     try {
@@ -201,7 +251,7 @@ router.post(
       const parsedSizes =
         typeof sizes === "string" ? JSON.parse(sizes) : sizes;
 
-      // ✅ Validations
+      // ✅ Validation
       if (!name || !category || !price || !parsedSizes?.length) {
         return res.status(400).json({
           success: false,
@@ -216,8 +266,8 @@ router.post(
         });
       }
 
-      // ✅ Build product
-      const product = new Product({
+      // ✅ Create product
+      const product = await Product.create({
         name,
         category,
         collection,
@@ -226,25 +276,23 @@ router.post(
         shortDescription,
         comparePrice: comparePrice ? Number(comparePrice) : undefined,
         sizes: parsedSizes,
-
-        /** 🔥 MAIN IMAGE */
         coverImage: {
           url: req.files.coverImage[0].path,
           publicId: req.files.coverImage[0].filename,
         },
-
-        /** 🔥 GALLERY IMAGES */
         galleryImages: req.files.galleryImages
           ? req.files.galleryImages.map((file) => ({
               url: file.path,
               publicId: file.filename,
             }))
           : [],
-
         active: active !== undefined ? active : true,
       });
 
-      await product.save();
+      /* 🔥 CACHE INVALIDATION */
+      await redis.del("product_categories");
+      await redis.del(`product:${product._id}`);
+      await redis.flushall(); // optional but safe for small catalog
 
       res.status(201).json({
         success: true,
@@ -252,7 +300,7 @@ router.post(
         product,
       });
     } catch (error) {
-      console.error("Error in POST /products:", error);
+      console.error("❌ Create product error:", error);
       res.status(500).json({
         success: false,
         message: "Server error",
@@ -261,6 +309,10 @@ router.post(
   }
 );
 
+/* =====================================================
+   SEARCH PRODUCTS
+   GET /api/products-enhanced/search
+===================================================== */
 router.get("/search", async (req, res) => {
   try {
     const { search, category, priceRange, ratings, sortBy } = req.query;
@@ -306,25 +358,31 @@ router.get("/search", async (req, res) => {
 });
 
 
+
+/* =====================================================
+   UPDATE PRODUCT (ADMIN)
+   PUT /api/products-enhanced/:id
+===================================================== */
 router.put(
   "/:id",
   protect,
   authorize("admin"),
+  upload.fields([
+    { name: "coverImage", maxCount: 1 },
+    { name: "galleryImages", maxCount: 20 },
+  ]),
   async (req, res) => {
     try {
-      if (!mongoose.isValidObjectId(req.params.id)) {
+      const { id } = req.params;
+
+      if (!mongoose.isValidObjectId(id)) {
         return res.status(400).json({
           success: false,
           message: "Invalid product ID",
         });
       }
 
-      const product = await Product.findByIdAndUpdate(
-        req.params.id,
-        req.body,
-        { new: true, runValidators: true }
-      );
-
+      const product = await Product.findById(id);
       if (!product) {
         return res.status(404).json({
           success: false,
@@ -332,13 +390,77 @@ router.put(
         });
       }
 
+      const {
+        name,
+        category,
+        collection,
+        sizes,
+        price,
+        description,
+        shortDescription,
+        comparePrice,
+        active,
+        existingImages,
+      } = req.body;
+
+      // Parse sizes
+      const parsedSizes =
+        typeof sizes === "string" ? JSON.parse(sizes) : sizes;
+
+      // Parse existing images
+      const parsedExistingImages =
+        typeof existingImages === "string"
+          ? JSON.parse(existingImages)
+          : existingImages || [];
+
+      // Merge images
+      const newGalleryImages = req.files?.galleryImages
+        ? req.files.galleryImages.map((file) => ({
+            url: file.path,
+            publicId: file.filename,
+          }))
+        : [];
+
+      if (req.files?.coverImage?.length) {
+        product.coverImage = {
+          url: req.files.coverImage[0].path,
+          publicId: req.files.coverImage[0].filename,
+        };
+      }
+
+      product.name = name ?? product.name;
+      product.category = category ?? product.category;
+      product.collection = collection ?? product.collection;
+      product.price = price ? Number(price) : product.price;
+      product.description = description ?? product.description;
+      product.shortDescription =
+        shortDescription ?? product.shortDescription;
+      product.comparePrice = comparePrice
+        ? Number(comparePrice)
+        : product.comparePrice;
+      product.sizes = parsedSizes ?? product.sizes;
+      product.active =
+        active !== undefined ? active === "true" || active === true : product.active;
+
+      product.galleryImages = [
+        ...parsedExistingImages,
+        ...newGalleryImages,
+      ];
+
+      await product.save();
+
+      /* 🔥 CACHE INVALIDATION */
+      await redis.del("product_categories");
+      await redis.del(`product:${product._id}`);
+      await redis.flushall(); // clears product list cache safely
+
       res.status(200).json({
         success: true,
         message: "Product updated successfully",
         product,
       });
     } catch (error) {
-      console.error("Error in PUT /products/:id:", error);
+      console.error("❌ Update product error:", error);
       res.status(500).json({
         success: false,
         message: "Server error",
@@ -347,6 +469,10 @@ router.put(
   }
 );
 
+/* =====================================================
+   DELETE PRODUCT (ADMIN)
+   DELETE /api/products-enhanced/:id
+===================================================== */
 router.delete(
   "/:id",
   protect,
