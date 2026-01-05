@@ -61,25 +61,54 @@ app.use(passport.initialize());
 app.set("trust proxy", 1);
 
 /* =====================================================
-   CORS (SAFE)
+   ✅ CORS – FINAL FIX
 ===================================================== */
-const allowedOrigins = [
+const allowedOrigins = new Set([
+  // Local
   "http://localhost:3000",
   "http://localhost:5173",
+  "http://localhost:5174",
+
+  // Production domains
+  "https://www.heritagesparrow.com",
+  "https://heritagesparrow.com",
+  "https://api.heritagesparrow.com",
+
+  // Vercel preview / fallback
+  "https://heritage-spparow-client.vercel.app",
+
   process.env.CLIENT_URL,
-].filter(Boolean);
+]);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow server-to-server / Postman / curl
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.has(origin)) {
         return callback(null, true);
       }
-      return callback(null, false); // ❌ don’t throw on Vercel
+
+      console.warn("❌ CORS blocked:", origin);
+      return callback(null, false);
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Origin",
+      "Content-Type",
+      "Accept",
+      "Authorization",
+      "Cache-Control",
+      "X-Requested-With",
+    ],
+    exposedHeaders: ["Content-Length"],
   })
 );
+
+/* IMPORTANT: Preflight support */
+app.options("*", cors());
 
 /* =====================================================
    SECURITY MIDDLEWARE
@@ -129,7 +158,7 @@ app.use(async (req, res, next) => {
       mongoReady = true;
       console.log("✅ MongoDB connected (Vercel reuse)");
     } catch (err) {
-      console.error("❌ MongoDB error", err);
+      console.error("❌ MongoDB error:", err);
       return res.status(500).json({ error: "Database unavailable" });
     }
   }
@@ -162,8 +191,8 @@ app.use("/api/admin", adminRoutes);
 app.get("/", (req, res) => {
   res.json({
     name: "Heritage Sparrow API",
-    environment: process.env.NODE_ENV || "production",
     status: "running",
+    environment: process.env.NODE_ENV || "production",
   });
 });
 
