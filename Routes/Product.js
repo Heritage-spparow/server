@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
-const Product = require('../Models/Product'); 
+const Product = require('../Models/Product');
 
 // router.post("/", upload.array("images", 6), async (req, res) => {
 //   try {
 //     const { name, category, collection, sizes, price, description, shortDescription, comparePrice } = req.body;
-     
+
 //     const parsedSizes = typeof sizes === 'string' ? JSON.parse(sizes) : sizes;
 //     console.log("BODY:", req.body);
 //     console.log("FILES:", req.files);
@@ -104,15 +104,16 @@ router.put(
 // Search Products
 router.get('/search', async (req, res) => {
   try {
-    const { keyword, category, priceRange, ratings, sortBy } = req.query;
-    const query = Product.find();
-
-    if (keyword) {
-      query.or([
-        { name: { $regex: keyword, $options: 'i' } },
-        { description: { $regex: keyword, $options: 'i' } },
-        { tags: { $in: [keyword] } }
-      ]);
+    if (req.query.search) {
+      const keyword = req.query.search.trim();
+      query = query.find({
+        $or: [
+          { name: { $regex: keyword, $options: "i" } },
+          { category: { $regex: keyword, $options: "i" } },
+          { collection: { $regex: keyword, $options: "i" } },
+          { description: { $regex: keyword, $options: "i" } },
+        ],
+      });
     }
 
     if (category) {

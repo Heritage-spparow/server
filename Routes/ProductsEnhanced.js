@@ -57,37 +57,49 @@ router.get("/featured", async (req, res) => {
    GET ALL PRODUCTS (FILTER + SORT + PAGINATION)
    GET /api/products-enhanced
 ===================================================== */
+/* =====================================================
+   GET ALL PRODUCTS (FILTER + SORT + PAGINATION + SEARCH)
+   GET /api/products-enhanced
+===================================================== */
 router.get("/", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 12;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 12;
     const skip = (page - 1) * limit;
 
     let query = Product.find({ active: true });
 
-    // Filtering
+    /* ---------- CATEGORY FILTER ---------- */
     if (req.query.category) {
       query = query.where("category").equals(req.query.category);
     }
 
+    /* ---------- PRICE FILTER ---------- */
     if (req.query.minPrice || req.query.maxPrice) {
       query = query.where("price");
-      if (req.query.minPrice) query = query.gte(req.query.minPrice);
-      if (req.query.maxPrice) query = query.lte(req.query.maxPrice);
+      if (req.query.minPrice) query = query.gte(Number(req.query.minPrice));
+      if (req.query.maxPrice) query = query.lte(Number(req.query.maxPrice));
     }
 
+    /* ---------- FEATURED FILTER ---------- */
     if (req.query.featured) {
       query = query.where("featured").equals(req.query.featured === "true");
     }
 
-    // Search (text index optional)
+    /* ---------- 🔥 SAFE SEARCH (NO $text) ---------- */
     if (req.query.search) {
+      const keyword = req.query.search.trim();
       query = query.find({
-        $text: { $search: req.query.search },
+        $or: [
+          { name: { $regex: keyword, $options: "i" } },
+          { category: { $regex: keyword, $options: "i" } },
+          { collection: { $regex: keyword, $options: "i" } },
+          { description: { $regex: keyword, $options: "i" } },
+        ],
       });
     }
 
-    // Sorting
+    /* ---------- SORTING ---------- */
     let sortBy = "-createdAt";
     if (req.query.sortBy) {
       const sortOptions = {
@@ -102,6 +114,7 @@ router.get("/", async (req, res) => {
 
     query = query.sort(sortBy);
 
+    /* ---------- EXECUTE QUERY ---------- */
     const products = await query.skip(skip).limit(limit).lean();
     const total = await Product.countDocuments(query.getQuery());
 
@@ -115,13 +128,14 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error in GET /products:", error);
+    console.error("Error in GET /api/products-enhanced:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
     });
   }
 });
+
 
 /* =====================================================
    GET SINGLE PRODUCT
@@ -246,6 +260,50 @@ router.post(
     }
   }
 );
+
+router.get("/search", async (req, res) => {
+  try {
+    const { search, category, priceRange, ratings, sortBy } = req.query;
+
+    let query = Product.find({ active: true });
+
+    if (search) {
+      const keyword = search.trim();
+      query = query.find({
+        $or: [
+          { name: { $regex: keyword, $options: "i" } },
+          { category: { $regex: keyword, $options: "i" } },
+          { collection: { $regex: keyword, $options: "i" } },
+          { description: { $regex: keyword, $options: "i" } },
+        ],
+      });
+    }
+
+    if (category) {
+      query = query.where("category").equals(category);
+    }
+
+    if (priceRange) {
+      const [min, max] = priceRange.split("-").map(Number);
+      query = query.where("price").gte(min).lte(max);
+    }
+
+    if (ratings) {
+      query = query.where("averageRating").gte(Number(ratings));
+    }
+
+    if (sortBy) {
+      const sortCriteria = sortBy.split(",").join(" ");
+      query = query.sort(sortCriteria);
+    }
+
+    const products = await query.lean();
+    res.status(200).json({ success: true, products });
+  } catch (error) {
+    console.error("Error in /search:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 
 router.put(
