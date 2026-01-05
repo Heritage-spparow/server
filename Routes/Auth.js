@@ -47,12 +47,12 @@ router.post('/register', [
     // Generate token
     const token = user.getSignedJwtToken();
 
-    res.cookie("token", token, {
+     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // HTTPS only
-      sameSite: "none",                              // cross-site
-      domain: ".heritagesparrow.com",                // www → api
-      maxAge: 7 * 24 * 60 * 60 * 1000,               // 7 days
+      secure: process.env.NODE_ENV === "production", // REQUIRED on HTTPS
+      sameSite: "none",                              // REQUIRED for cross-site
+      domain: ".heritagesparrow.com",                // REQUIRED for www → api
+      maxAge: 7 * 24 * 60 * 60 * 1000,              
     });
 
 
@@ -92,74 +92,111 @@ router.post('/register', [
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
-router.post("/login", async (req, res) => {
+router.post('/login', [
+  body('email').isEmail().withMessage('Please provide a valid email'),
+  body('password').notEmpty().withMessage('Password is required')
+], async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    /* ---------- VALIDATION ---------- */
-    if (!email || !password) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: "Email and password are required",
+        errors: errors.array()
       });
     }
 
-    /* ---------- FIND USER ---------- */
-    const user = await User.findOne({ email }).select("+password");
+    const { email, password } = req.body;
+
+    // Check for user
+    const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: 'Invalid credentials'
       });
     }
 
-    /* ---------- CHECK PASSWORD ---------- */
-    const isMatch = await bcrypt.compare(password, user.password);
+    // Check if account is locked
+    if (user.isLocked) {
+      return res.status(423).json({
+        success: false,
+        message: 'Account temporarily locked due to too many failed login attempts'
+      });
+    }
+
+    // Check if account is active
+    if (user.accountStatus !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is suspended or closed'
+      });
+    }
+
+    // Check if password matches
+    const isMatch = await user.matchPassword(password);
     if (!isMatch) {
+      await user.incLoginAttempts();
       return res.status(401).json({
         success: false,
-        message: "Invalid email or password",
+        message: 'Invalid credentials'
       });
     }
 
-    /* ---------- GENERATE TOKEN ---------- */
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // Reset login attempts on successful login
+    if (user.loginAttempts && user.loginAttempts > 0) {
+      await user.resetLoginAttempts();
+    }
 
-    /* ---------- SET COOKIE (🔥 CRITICAL FIX 🔥) ---------- */
-    res.cookie("token", token, {
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Generate token
+    const token = user.getSignedJwtToken();
+
+     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // REQUIRED on HTTPS
-      sameSite: "none",                              // REQUIRED for cross-site
-      domain: ".heritagesparrow.com",                // REQUIRED for www → api
+      secure: process.env.NODE_ENV === "production", // HTTPS only
+      sameSite: "none",                              // cross-site
+      domain: ".heritagesparrow.com",                // www → api
       maxAge: 7 * 24 * 60 * 60 * 1000,               // 7 days
     });
 
-    /* ---------- RESPONSE ---------- */
-    res.status(200).json({
-      success: true,
-      message: "Login successful",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token, // optional (frontend/debug)
-    });
+    // Set token as httpOnly cookie
+    const cookieOptions = {
+      expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    };
+
+    res.status(200)
+      .cookie('token', token, cookieOptions)
+      .json({
+        success: true,
+        token,
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          lastLogin: user.lastLogin,
+          defaultAddress: user.defaultAddress
+        }
+      });
 
   } catch (error) {
-    console.error("❌ LOGIN ERROR:", error);
+    console.error(error);
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: 'Server error'
     });
   }
 });
-
 
 // @desc    Logout user
 // @route   POST /api/auth/logout
@@ -485,15 +522,15 @@ router.get(
     }
 
     const token = req.user.getSignedJwtToken();
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "none",
-      domain: ".heritagesparrow.com",
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
+   res.cookie("token", token, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "none",
+  domain: ".heritagesparrow.com",
+  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+});
 
-    return res.redirect(`${process.env.CLIENT_URL}/?token=${token}`);
+    return res.redirect(`${process.env.CLIENT_URL}/?token=${token}`); 
   }
 );
 module.exports = router;
