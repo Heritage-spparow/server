@@ -66,6 +66,7 @@ router.post("/add", protect, async (req, res) => {
 
     res.status(200).json({ success: true, cart });
   } catch (error) {
+    console.error("❌ Add to cart error:", error);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });

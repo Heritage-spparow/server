@@ -530,7 +530,8 @@ router.get(
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
 });
 
-    return res.redirect(`${process.env.CLIENT_URL}/?token=${token}`); 
+    return res.redirect(`${process.env.CLIENT_URL}/auth/success?token=${token}`);
+
   }
 );
 module.exports = router;
