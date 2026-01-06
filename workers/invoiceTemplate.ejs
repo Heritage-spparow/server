@@ -1,294 +1,232 @@
 <%
-// Define helper functions and variables
 const formatCurrency = (amount) => `₹${Number(amount || 0).toFixed(2)}`;
-const formatDate = (date) => moment(date).format('DD/MM/YYYY');
-const total = order.totalPrice;
+const formatDate = (date) => moment(date).format('MMM DD, YYYY');
 %>
 
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cash Memo for Order #<%= order.orderNumber %></title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Order Confirmation – Heritage Sparrow</title>
+
 <style>
-/* Define styles to be inlined by juice */
-.container {
-max-width: 600px;
-margin: 20px auto;
-/* amber-50 equivalent */
-background-color: #fffaf0;
-border: 4px solid black;
-padding: 30px;
-font-family: Georgia, serif;
-box-sizing: border-box;
-}
-.header {
-display: flex;
-justify-content: space-between;
-align-items: flex-start;
-margin-bottom: 25px;
-flex-wrap: wrap;
-}
-.info-group {
-display: flex;
-flex-direction: column;
-gap: 10px;
-}
-.info-row {
-display: flex;
-flex-wrap: wrap;
-gap: 20px;
-}
-.input-line {
-border: none;
-border-bottom: 1px solid black;
-width: 100px;
-padding: 0;
-margin-left: 5px;
-font-size: 14px;
-background-color: transparent;
-}
-.logo-area {
-display: flex;
-flex-direction: column;
-align-items: center;
-gap: 5px;
-text-align: center;
-}
-.logo-box {
-width: 80px;
-height: 80px;
-border: 2px dashed #999;
-display: flex;
-align-items: center;
-justify-content: center;
-background-color: white;
-color: #999;
-font-size: 12px;
-}
-.separator {
-border-top: 4px solid black;
-margin: 15px 0;
-}
-.separator-light {
-border-top: 2px solid black;
-margin: 10px 0;
-}
-.memo-title {
-text-align: center;
-font-weight: bold;
-font-size: 24px;
-letter-spacing: 3px;
-margin: 20px 0;
-}
-table {
-width: 100%;
-border-collapse: collapse;
-margin: 15px 0;
-font-size: 14px;
-}
-th, td {
-padding: 10px;
-text-align: left;
-border-bottom: 1px solid black;
-}
-th {
-font-weight: bold;
-border-right: 1px solid black;
-border-bottom: 2px solid black;
-font-size: 14px;
-}
-td:not(:last-child) {
-border-right: 1px solid black;
-}
-tr:last-child td {
-border-bottom: none;
-}
-.text-right {
-text-align: right;
-}
-.total-row {
-display: flex;
-justify-content: flex-end;
-margin: 20px 0;
-padding-right: 10px;
-}
-.total-box {
-display: flex;
-width: 250px;
-justify-content: space-between;
-font-size: 16px;
-font-weight: bold;
-}
-.total-value {
-border-bottom: 1px solid black;
-width: 120px;
-text-align: right;
-}
-.footer-flex {
-display: flex;
-justify-content: space-between;
-align-items: flex-end;
-margin: 30px 0 10px 0;
-flex-wrap: wrap;
-gap: 20px;
-}
-.signature-line {
-border-top: 2px solid black;
-width: 160px;
-margin-top: 10px;
-}
-.qr-section {
-display: flex;
-gap: 15px;
-align-items: center;
-margin-top: 20px;
-flex-wrap: wrap;
-}
-.qr-box {
-width: 80px;
-height: 80px;
-background-color: #e0e0e0;
-border: 2px solid black;
-display: flex;
-align-items: center;
-justify-content: center;
-font-size: 10px;
-color: #666;
-}
-.meta-data {
-font-size: 12px;
-font-weight: bold;
-}
+  body {
+    margin: 0;
+    padding: 0;
+    background: #0f0f12;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #eaeaea;
+  }
+
+  .container {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  .card {
+    background: #151519;
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
+  }
+
+  .brand {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #d8c37a;
+  }
+
+  .muted {
+    color: #9a9a9a;
+    font-size: 14px;
+  }
+
+  .title {
+    font-size: 26px;
+    margin: 14px 0 8px;
+    font-weight: 500;
+  }
+
+  .btn {
+    display: inline-block;
+    margin: 24px 0;
+    background: #4c8ec2;
+    color: #fff;
+    text-decoration: none;
+    padding: 14px 22px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .divider {
+    height: 1px;
+    background: rgba(255,255,255,0.08);
+    margin: 24px 0;
+  }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+
+  .section-title {
+    margin: 32px 0 14px;
+    font-size: 18px;
+    font-weight: 500;
+  }
+
+  .product {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .product img {
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #222;
+  }
+
+  .product-name {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .price {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .total {
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+
+  .footer {
+    text-align: center;
+    margin-top: 32px;
+    font-size: 13px;
+    color: #8c8c8c;
+  }
+
+  @media (max-width: 480px) {
+    .card {
+      padding: 20px;
+    }
+
+    .title {
+      font-size: 22px;
+    }
+  }
 </style>
 </head>
+
 <body>
-<div class="container">
-<!-- Header Section -->
-<div class="header">
-<div class="info-group" style="width: 40%; min-width: 200px;">
-<div class="info-row">
-<div style="flex-shrink: 0;">
-<span class="meta-data">Date:</span>
-<span class="input-line" style="width: 100px;"><%= formatDate(order.createdAt) %></span>
-</div>
-</div>
-<div class="info-row" style="margin-top: 5px;">
-<div style="flex-shrink: 0;">
-<span class="meta-data">Batch no.:</span>
-<span class="input-line" style="width: 100px;">N/A</span>
-</div>
-</div>
-</div>
+  <div class="container">
+    <div class="card">
 
-        <!-- Logo Area (Center) -->
-        <div class="logo-area" style="width: 20%; min-width: 120px; margin-top: -10px;">
-            <div class="logo-box">Logo</div>
-            <p style="font-size: 14px; font-weight: bold; letter-spacing: 2px; margin: 5px 0 0 0;">HERITAGE SPARROW</p>
-        </div>
+      <!-- BRAND -->
+      <div class="brand">HERITAGE SPARROW</div>
+      <div class="muted">Order #<%= order.orderNumber %></div>
 
-        <!-- Contact (Right) -->
-        <div style="text-align: right; width: 30%; min-width: 150px;">
-            <p style="font-weight: bold; font-size: 14px; margin: 0;">heritagsparrow.com</p>
-            <p style="font-size: 12px; margin-top: 10px; line-height: 1.5;">
-                **Billed To:**<br>
-                <%= user.fullName || user.firstName %><br>
-                <%= order.shippingAddress.address %>, <%= order.shippingAddress.city %><br>
-                <%= order.shippingAddress.postalCode %>, <%= order.shippingAddress.country %>
-            </p>
+      <!-- TITLE -->
+      <div class="title">Thank you for your purchase!</div>
+      <p class="muted">
+        We’re getting your order ready to be shipped. You’ll be notified once it’s on the way.
+      </p>
+
+      <!-- CTA -->
+      <a href="https://www.heritagesparrow.com/orders" class="btn">
+        View your order
+      </a>
+
+      <!-- META -->
+      <div class="row">
+        <span class="muted">Order Date</span>
+        <span><%= formatDate(order.createdAt) %></span>
+      </div>
+      <div class="row">
+        <span class="muted">Payment Method</span>
+        <span><%= order.paymentMethod === "razorpay" ? "Online Payment" : "Cash on Delivery" %></span>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- ORDER SUMMARY -->
+      <div class="section-title">Order summary</div>
+
+      <% order.orderItems.forEach(item => { %>
+        <div class="product">
+          <img src="<%= item.image %>" alt="<%= item.name %>" />
+          <div style="flex:1">
+            <div class="product-name">
+              <%= item.name %> × <%= item.quantity %>
+            </div>
+          </div>
+          <div class="price">
+            <%= formatCurrency(item.price * item.quantity) %>
+          </div>
         </div>
+      <% }) %>
+
+      <div class="divider"></div>
+
+      <!-- TOTALS -->
+      <div class="row">
+        <span class="muted">Subtotal</span>
+        <span><%= formatCurrency(order.itemsPrice) %></span>
+      </div>
+      <div class="row">
+        <span class="muted">Shipping</span>
+        <span><%= formatCurrency(order.shippingPrice) %></span>
+      </div>
+      <div class="row">
+        <span class="muted">Taxes</span>
+        <span><%= formatCurrency(order.taxPrice) %></span>
+      </div>
+
+      <div class="row total">
+        <span>Total</span>
+        <span><%= formatCurrency(order.totalPrice) %></span>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- CUSTOMER INFO -->
+      <div class="section-title">Customer information</div>
+
+      <p class="muted">
+        <strong>Shipping address</strong><br />
+        <%= user.firstName %> <%= user.lastName %><br />
+        <%= order.shippingAddress.address %><br />
+        <%= order.shippingAddress.city %>, <%= order.shippingAddress.state %> <%= order.shippingAddress.postalCode %><br />
+        <%= order.shippingAddress.country %>
+      </p>
+
+      <p class="muted">
+        <strong>Shipping method</strong><br />
+        Free Shipping
+      </p>
+
+      <!-- FOOTER -->
+      <div class="footer">
+        If you have any questions, reply to this email or contact us at  
+        <strong>support@heritagesparrow.com</strong>
+      </div>
+
     </div>
-
-    <!-- Info Section -->
-    <div style="margin-top: 15px; font-size: 14px;">
-        <p class="meta-data" style="margin: 5px 0;">
-            Bill no. <span class="input-line" style="width: 180px;"><%= order._id.toString().slice(-8).toUpperCase() %></span>
-        </p>
-        <p class="meta-data" style="margin: 5px 0;">
-            Order no. <span class="input-line" style="width: 180px;"><%= order.orderNumber %></span>
-        </p>
-    </div>
-
-    <div class="separator"></div>
-
-    <!-- Title -->
-    <h1 class="memo-title">CASH MEMO</h1>
-
-    <div class="separator-light"></div>
-
-    <!-- Item Table -->
-    <div style="overflow-x: auto;">
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 10%; border-left: none;">S.no.</th>
-                    <th style="width: 50%;">Product Name</th>
-                    <th style="width: 20%;">Quantity</th>
-                    <th style="width: 20%; border-right: none;">Price</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% order.orderItems.forEach((item, index) => { %>
-                <tr>
-                    <td style="border-left: none;"><%= index + 1 %></td>
-                    <td><%= item.product?.name || item.name %></td>
-                    <td><%= item.quantity %></td>
-                    <td style="border-right: none;"><%= formatCurrency(item.price * item.quantity) %></td>
-                </tr>
-                <% }) %>
-                <% for (let i = order.orderItems.length; i < 5; i++) { %>
-                <tr style="height: 35px;">
-                    <td style="border-left: none;"><%= i + 1 %></td>
-                    <td></td>
-                    <td></td>
-                    <td style="border-right: none;"></td>
-                </tr>
-                <% } %>
-            </tbody>
-        </table>
-    </div>
-
-    <div class="separator-light"></div>
-
-    <!-- Total Section -->
-    <div class="total-row">
-        <div class="total-box">
-            <span style="flex-shrink: 0; font-size: 14px;">Total</span>
-            <span class="total-value" style="font-size: 14px;"><%= formatCurrency(total) %></span>
-        </div>
-    </div>
-
-    <div class="separator-light"></div>
-
-    <!-- Signature Section -->
-    <div class="footer-flex">
-        <div>
-            <p style="font-weight: bold; font-size: 14px; margin-bottom: 20px;">Signature</p>
-            <div class="signature-line"></div>
-        </div>
-        <div style="text-align: right;">
-            <div class="signature-line" style="width: 200px; margin-bottom: 5px;"></div>
-            <p style="font-size: 14px; font-weight: bold; margin: 0;">Heritage Sparrow</p>
-        </div>
-    </div>
-
-    <div class="separator-light" style="margin: 20px 0;"></div>
-
-    <!-- QR Code and Footer Text -->
-    <div class="qr-section">
-        <div class="qr-box">
-            QR Code 
-        </div>
-        <div style="font-size: 14px; flex-grow: 1;">
-            <p style="font-weight: bold; margin: 0;">Scan this QR Code and</p>
-            <p style="font-weight: bold; margin: 0;">Follow Heritage Sparrow on Instagram for more details.</p>
-            <p style="font-size: 12px; margin-top: 10px; font-style: italic;">*This Cash memo is not a valid proof of purchase.</p>
-        </div>
-    </div>
-</div>
-
-
+  </div>
 </body>
 </html>

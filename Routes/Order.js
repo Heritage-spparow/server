@@ -83,7 +83,7 @@ router.post("/capture", protect, async (req, res) => {
       totalPrice,
     } = req.body;
 
-    // 1. Verify signature
+    // 1️⃣ Verify Razorpay signature
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_SECRET)
       .update(razorpayOrderId + "|" + paymentId)
@@ -96,21 +96,44 @@ router.post("/capture", protect, async (req, res) => {
       });
     }
 
-    // 2. Validate stock again
+    // 2️⃣ Validate stock + normalize order items (IMPORTANT)
+    const normalizedItems = [];
+
     for (const item of orderItems) {
       const product = await Product.findById(item.product);
-      if (!product || !product.active || product.stock < item.quantity) {
+
+      if (!product || !product.active) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${item.name}`,
+          message: `Product not available`,
         });
       }
+
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.name}`,
+        });
+      }
+
+      normalizedItems.push({
+        product: product._id,
+        name: product.name,
+        image:
+          product.images?.[0]?.url ||
+          product.coverImage?.url ||
+          "/placeholder.png",
+        price: item.price,
+        quantity: item.quantity,
+        size: item.size,
+        color: item.color,
+      });
     }
 
-    // 3. Create order now (only after payment success)
+    // 3️⃣ Create order ONLY after successful payment
     const order = await Order.create({
       user: req.user._id,
-      orderItems,
+      orderItems: normalizedItems,
       shippingAddress,
       paymentMethod: "razorpay",
       paymentResult: {
@@ -128,34 +151,37 @@ router.post("/capture", protect, async (req, res) => {
       status: "processing",
     });
 
-    // 4. Reduce stock
-    for (const item of order.orderItems) {
+    // 4️⃣ Reduce stock
+    for (const item of normalizedItems) {
       await Product.findByIdAndUpdate(item.product, {
         $inc: { stock: -item.quantity },
       });
     }
 
-    // 5. Clear cart
+    // 5️⃣ Clear cart
     await Cart.findOneAndUpdate(
       { user: req.user._id },
       { $set: { items: [], totalItems: 0, totalPrice: 0 } }
     );
 
-    // 6. Send invoice email
-    emailQueue.add('order_invoice', { orderId: order._id.toString() });
+    // 6️⃣ Send invoice email
+    emailQueue.add("order_invoice", {
+      orderId: order._id.toString(),
+    });
 
-    res.json({
+    return res.json({
       success: true,
       order,
     });
   } catch (error) {
     console.error("Order capture failed:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Payment captured but order creation failed",
     });
   }
 });
+
 
 // @route   POST /api/orders/razorpay/verify
 // @desc    Verify Razorpay Payment Signature
