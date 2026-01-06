@@ -33,13 +33,14 @@ const passport = require('./config/passport');
 console.log('1 Starting server...');
 const logDir = path.join(__dirname, "logs");
 const transports = [
-  new winston.transports.Console({
+  new winston.transports.Console({ 
     format: winston.format.combine(
       winston.format.colorize(),
-      winston.format.simple()
+      winston.format.simple() 
     )
   })
 ];
+
 
 if (fs.existsSync(logDir)) {
   transports.push(

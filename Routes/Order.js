@@ -8,6 +8,8 @@ const { protect, authorize } = require('../middleware/auth');
 const { body, validationResult } = require('express-validator');
 const { emailQueue } = require('../queues/emailQueue');
 const PDFDocument = require('pdfkit');
+const path = require("path");
+
 
 // ⭐ RAZORPAY IMPORTS
 const Razorpay = require("razorpay");
@@ -19,6 +21,13 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_SECRET,
 });
 
+const fs = require("fs");
+
+// console.log(
+//   "📄 Template exists:",
+//   fs.existsSync(path.join(__dirname, "../templates/invoiceTemplate.ejs")),
+  
+// );
 
 // @route   POST /api/orders/razorpay
 // @desc    Create Razorpay Order ID only (no DB order yet)
@@ -69,6 +78,12 @@ router.post("/razorpay", protect, async (req, res) => {
 // @route   POST /api/orders/capture
 // @desc    Capture payment + create order only after successful payment
 // @access  Private
+// @route   POST /api/orders/capture
+// @desc    Capture Razorpay payment + create order + send confirmation email
+// @access  Private
+// @route   POST /api/orders/capture
+// @desc    Capture Razorpay payment + create order + send email
+// @access  Private
 router.post("/capture", protect, async (req, res) => {
   try {
     const {
@@ -83,10 +98,12 @@ router.post("/capture", protect, async (req, res) => {
       totalPrice,
     } = req.body;
 
-    // 1️⃣ Verify Razorpay signature
+    /* =====================================================
+       VERIFY RAZORPAY SIGNATURE
+    ===================================================== */
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_SECRET)
-      .update(razorpayOrderId + "|" + paymentId)
+      .update(`${razorpayOrderId}|${paymentId}`)
       .digest("hex");
 
     if (expectedSignature !== signature) {
@@ -96,8 +113,10 @@ router.post("/capture", protect, async (req, res) => {
       });
     }
 
-    // 2️⃣ Validate stock + normalize order items (IMPORTANT)
-    const normalizedItems = [];
+    /* =====================================================
+       VALIDATE & NORMALIZE ITEMS
+    ===================================================== */
+    const items = [];
 
     for (const item of orderItems) {
       const product = await Product.findById(item.product);
@@ -105,7 +124,7 @@ router.post("/capture", protect, async (req, res) => {
       if (!product || !product.active) {
         return res.status(400).json({
           success: false,
-          message: `Product not available`,
+          message: "Product not available",
         });
       }
 
@@ -116,13 +135,10 @@ router.post("/capture", protect, async (req, res) => {
         });
       }
 
-      normalizedItems.push({
+      items.push({
         product: product._id,
         name: product.name,
-        image:
-          product.images?.[0]?.url ||
-          product.coverImage?.url ||
-          "/placeholder.png",
+        image: product.images?.[0]?.url || "/placeholder.png",
         price: item.price,
         quantity: item.quantity,
         size: item.size,
@@ -130,10 +146,12 @@ router.post("/capture", protect, async (req, res) => {
       });
     }
 
-    // 3️⃣ Create order ONLY after successful payment
+    /* =====================================================
+       CREATE PAID ORDER
+    ===================================================== */
     const order = await Order.create({
       user: req.user._id,
-      orderItems: normalizedItems,
+      orderItems: items,
       shippingAddress,
       paymentMethod: "razorpay",
       paymentResult: {
@@ -151,33 +169,68 @@ router.post("/capture", protect, async (req, res) => {
       status: "processing",
     });
 
-    // 4️⃣ Reduce stock
-    for (const item of normalizedItems) {
+    /* =====================================================
+       REDUCE STOCK
+    ===================================================== */
+    for (const item of items) {
       await Product.findByIdAndUpdate(item.product, {
         $inc: { stock: -item.quantity },
       });
     }
 
-    // 5️⃣ Clear cart
+    /* =====================================================
+       CLEAR CART
+    ===================================================== */
     await Cart.findOneAndUpdate(
       { user: req.user._id },
       { $set: { items: [], totalItems: 0, totalPrice: 0 } }
     );
 
-    // 6️⃣ Send invoice email
-    emailQueue.add("order_invoice", {
-      orderId: order._id.toString(),
-    });
+    /* =====================================================
+       SEND EMAIL (ONLINE PAYMENT)
+    ===================================================== */
+    try {
+      const ejs = require("ejs");
+      const juice = require("juice");
+      const moment = require("moment");
+      const getMailer = require("../utils/mailer");
+
+      const transporter = getMailer();
+
+      const templatePath = path.join(
+        __dirname,
+        "../templates/invoiceTemplate.ejs"
+      );
+
+      const htmlRaw = await ejs.renderFile(templatePath, {
+        order,
+        user: req.user,
+        moment,
+      });
+
+      const html = juice(htmlRaw);
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM,
+        to: req.user.email,
+        subject: `Order Confirmed – #${order.orderNumber}`,
+        html,
+      });
+
+      console.log("✅ Razorpay email sent:", req.user.email);
+    } catch (err) {
+      console.error("❌ Razorpay email failed:", err.message);
+    }
 
     return res.json({
       success: true,
       order,
     });
   } catch (error) {
-    console.error("Order capture failed:", error);
+    console.error("❌ Capture failed:", error);
     return res.status(500).json({
       success: false,
-      message: "Payment captured but order creation failed",
+      message: "Payment captured but order failed",
     });
   }
 });
@@ -225,108 +278,163 @@ router.post("/razorpay/verify", protect, async (req, res) => {
 
 
 
-router.post('/', protect, [ 
-  body('shippingAddress.address').notEmpty().withMessage('Address is required'),
-  body('shippingAddress.city').notEmpty().withMessage('City is required'),
-  body('shippingAddress.postalCode').notEmpty().withMessage('Postal code is required'),
-  body('shippingAddress.country').notEmpty().withMessage('Country is required'),
-  body('shippingAddress.phone').notEmpty().withMessage('Phone number is required'),
-  body('paymentMethod').notEmpty().withMessage('Payment method is required')
-], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
+// @route   POST /api/orders
+// @desc    Create COD order + send confirmation email (Vercel safe)
+// @access  Private
+router.post(
+  "/",
+  protect,
+  [
+    body("shippingAddress.address").notEmpty(),
+    body("shippingAddress.city").notEmpty(),
+    body("shippingAddress.postalCode").notEmpty(),
+    body("shippingAddress.country").notEmpty(),
+    body("shippingAddress.phone").notEmpty(),
+    body("paymentMethod").notEmpty(),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          errors: errors.array(),
+        });
+      }
+
+      const {
+        orderItems,
+        shippingAddress,
+        paymentMethod,
+        itemsPrice,
+        taxPrice,
+        shippingPrice,
+        totalPrice,
+      } = req.body;
+
+      if (paymentMethod !== "cod") {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid payment method for this route",
+        });
+      }
+
+      /* =====================================================
+         VALIDATE ITEMS
+      ===================================================== */
+      const items = [];
+
+      for (const item of orderItems) {
+        const product = await Product.findById(item.product);
+
+        if (!product || !product.active) {
+          return res.status(400).json({
+            success: false,
+            message: "Product not available",
+          });
+        }
+
+        if (product.stock < item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${product.name}`,
+          });
+        }
+
+        items.push({
+          product: product._id,
+          name: product.name,
+          image: product.images?.[0]?.url || "/placeholder.png",
+          price: item.price,
+          quantity: item.quantity,
+          size: item.size,
+          color: item.color,
+        });
+      }
+
+      /* =====================================================
+         CREATE COD ORDER
+      ===================================================== */
+      const order = await Order.create({
+        user: req.user._id,
+        orderItems: items,
+        shippingAddress,
+        paymentMethod: "cod",
+        itemsPrice,
+        taxPrice,
+        shippingPrice,
+        totalPrice,
+        isPaid: false,
+        status: "pending",
       });
-    }
 
-    const { orderItems, shippingAddress, paymentMethod, itemsPrice, taxPrice, shippingPrice, totalPrice } = req.body;
-
-    let items = orderItems;
-
-    if (!items || items.length === 0) {
-      const cart = await Cart.findOne({ user: req.user._id }).populate('items.product');
-
-      if (!cart || cart.items.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'No items to order'
+      /* =====================================================
+         REDUCE STOCK
+      ===================================================== */
+      for (const item of items) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: -item.quantity },
         });
       }
 
-      items = cart.items.map(item => ({
-        product: item.product._id,
-        name: item.product.name,
-        image: item.product.images[0]?.url || '',
-        price: item.product.effectivePrice,
-        quantity: item.quantity,
-        color: item.color,
-        size: item.size
-      }));
-    }
-
-    for (const item of items) {
-      const product = await Product.findById(item.product);
-
-      if (!product || !product.active) {
-        return res.status(400).json({
-          success: false,
-          message: `Product ${item.name} is not available`
-        });
-      }
-
-      if (product.stock < item.quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for ${item.name}`
-        });
-      }
-    }
-
-    const calculatedItemsPrice = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
-    const calculatedTaxPrice = calculatedItemsPrice * 0.08;
-    const calculatedShippingPrice = calculatedItemsPrice > 100 ? 0 : 10;
-    const calculatedTotalPrice = calculatedItemsPrice + calculatedTaxPrice + calculatedShippingPrice;
-
-    const order = await Order.create({
-      user: req.user._id,
-      orderItems: items,
-      shippingAddress,
-      paymentMethod,
-      itemsPrice: itemsPrice || calculatedItemsPrice,
-      taxPrice: taxPrice || calculatedTaxPrice,
-      shippingPrice: shippingPrice || calculatedShippingPrice,
-      totalPrice: totalPrice || calculatedTotalPrice
-    });
-
-    // Empty cart after order
-    if (!orderItems) {
+      /* =====================================================
+         CLEAR CART
+      ===================================================== */
       await Cart.findOneAndUpdate(
         { user: req.user._id },
         { $set: { items: [], totalItems: 0, totalPrice: 0 } }
       );
+
+      /* =====================================================
+         SEND EMAIL (COD)
+      ===================================================== */
+      try {
+        const ejs = require("ejs");
+        const juice = require("juice");
+        const moment = require("moment");
+        const getMailer = require("../utils/mailer");
+
+        const transporter = getMailer();
+
+        const templatePath = path.join(
+          __dirname,
+          "../templates/invoiceTemplate.ejs"
+        );
+
+        const htmlRaw = await ejs.renderFile(templatePath, {
+          order,
+          user: req.user,
+          moment,
+        });
+
+        const html = juice(htmlRaw);
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM,
+          to: req.user.email,
+          subject: `Order Confirmed (COD) – #${order.orderNumber}`,
+          html,
+        });
+
+        console.log("✅ COD email sent:", req.user.email);
+      } catch (err) {
+        console.error("❌ COD email failed:", err.message);
+      }
+
+      return res.status(201).json({
+        success: true,
+        order,
+      });
+    } catch (error) {
+      console.error("❌ COD order failed:", error);
+      return res.status(500).json({
+        success: false,
+        message: "COD order creation failed",
+      });
     }
-
-    // Email invoice
-    emailQueue.add('order_invoice', { orderId: order._id.toString() })
-      .catch(err => console.error('Failed to enqueue invoice email:', err));
-
-    res.status(201).json({
-      success: true,
-      message: 'Order created successfully',
-      order
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
   }
-});
+);
+
 
 router.get('/my', protect, async (req, res) => {
   try {

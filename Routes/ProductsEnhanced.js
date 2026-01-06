@@ -240,17 +240,20 @@ router.post(
         },
         galleryImages: req.files.galleryImages
           ? req.files.galleryImages.map((file) => ({
-              url: file.path,
-              publicId: file.filename,
-            }))
+            url: file.path,
+            publicId: file.filename,
+          }))
           : [],
         active: active !== undefined ? active : true,
       });
 
       /* 🔥 CACHE INVALIDATION */
-      await redis.del("product_categories");
-      await redis.del(`product:${product._id}`);
-      await redis.flushall(); // optional but safe for small catalog
+      const redis = getRedis();
+      if (redis) {
+        await redis.del("product_categories");
+        await redis.del(`product:${product._id}`);
+        await redis.flushall();
+      } // optional but safe for small catalog
 
       res.status(201).json({
         success: true,
@@ -374,9 +377,9 @@ router.put(
       // Merge images
       const newGalleryImages = req.files?.galleryImages
         ? req.files.galleryImages.map((file) => ({
-            url: file.path,
-            publicId: file.filename,
-          }))
+          url: file.path,
+          publicId: file.filename,
+        }))
         : [];
 
       if (req.files?.coverImage?.length) {

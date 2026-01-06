@@ -40,7 +40,7 @@ function getRedis() {
       console.warn("⚠️ Redis unavailable, caching disabled");
       client = null;
       isReady = false;
-    });
+    }); 
   }
 
   // 🔴 KEY LINE
