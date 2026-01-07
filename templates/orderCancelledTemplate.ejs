@@ -8,7 +8,7 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Order Confirmation – Heritage Sparrow</title>
+<title>Order Cancelled – Heritage Sparrow</title>
 
 <style>
   body {
@@ -124,11 +124,6 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
     text-align: right;
   }
 
-  .total {
-    font-size: 18px;
-    font-weight: 700;
-  }
-
   .divider {
     height: 1px;
     background: #eee;
@@ -155,7 +150,7 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
   .btn {
     display: inline-block;
     margin-top: 22px;
-    background: #5a8f3c;
+    background: #8a3c3c;
     color: #ffffff;
     text-decoration: none;
     padding: 12px 22px;
@@ -181,10 +176,9 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
       <!-- HEADER -->
       <div class="header">
         <div class="brand">HERITAGE SPARROW</div>
-        <div class="order-title">ORDER CONFIRMATION</div>
+        <div class="order-title">ORDER CANCELLED</div>
         <p class="subtext">
-          <%= user.firstName %>, thank you for your order!  
-          We’ll notify you once your package is shipped.
+          <%= user.firstName %>, your order has been successfully cancelled.
         </p>
       </div>
 
@@ -199,14 +193,14 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
           <span><%= formatDate(order.createdAt) %></span>
         </div>
         <div class="row">
-          <span>Payment method</span>
-          <span><%= order.paymentMethod === "razorpay" ? "Online Payment" : "Cash on Delivery" %></span>
+          <span>Order status</span>
+          <span>Cancelled</span>
         </div>
       </div>
 
-      <!-- PRODUCT -->
+      <!-- PRODUCT SUMMARY -->
       <div class="section">
-        <div class="section-title">Order summary</div>
+        <div class="section-title">Cancelled items</div>
 
         <% order.orderItems.forEach(item => { %>
           <div class="product-box">
@@ -215,7 +209,9 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
             </div>
             <div style="display: table-cell" class="product-details">
               <div class="product-name"><%= item.name %></div>
-              <div class="product-meta">Quantity: <%= item.quantity %></div>
+              <div class="product-meta">
+                Quantity: <%= item.quantity %>
+              </div>
             </div>
             <div style="display: table-cell" class="price">
               <%= formatCurrency(item.price * item.quantity) %>
@@ -224,30 +220,22 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
         <% }) %>
       </div>
 
-      <!-- TOTALS -->
+      <!-- REFUND INFO -->
       <div class="section">
-        <div class="row">
-          <span>Subtotal</span>
-          <span><%= formatCurrency(order.itemsPrice) %></span>
-        </div>
-        <div class="row">
-          <span>Shipping</span>
-          <span><%= formatCurrency(order.shippingPrice) %></span>
-        </div>
-        <div class="row">
-          <span>Taxes</span>
-          <span>All taxes are inclusive</span>
-        </div>
+        <div class="section-title">Refund information</div>
 
-        <div class="divider"></div>
+        <p style="font-size: 14px; color: #555; line-height: 1.6;">
+          <% if (order.paymentMethod === "razorpay") { %>
+            Your payment of <strong><%= formatCurrency(order.totalPrice) %></strong>
+            has been received and the refund (if applicable) will be processed to
+            your original payment method within <strong>5–7 business days</strong>.
+          <% } else { %>
+            Since this was a Cash on Delivery order, no payment was charged.
+          <% } %>
+        </p>
 
-        <div class="row total">
-          <span>Total</span>
-          <span><%= formatCurrency(order.totalPrice) %></span>
-        </div>
-
-        <a href="https://www.heritagesparrow.com/order/<%= order._id %>" class="btn">
-          View order
+        <a href="https://www.heritagesparrow.com/orders" class="btn">
+          View orders
         </a>
       </div>
 
@@ -258,20 +246,22 @@ const formatDate = (date) => moment(date).format('MMM DD, YYYY');
             <strong>Shipping address</strong>
             <%= user.firstName %> <%= user.lastName %><br />
             <%= order.shippingAddress.address %><br />
-            <%= order.shippingAddress.city %>, <%= order.shippingAddress.state %> <%= order.shippingAddress.postalCode %><br />
+            <%= order.shippingAddress.city %>, <%= order.shippingAddress.state %>
+            <%= order.shippingAddress.postalCode %><br />
             <%= order.shippingAddress.country %>
           </div>
 
           <div class="col">
-            <strong>Shipping method</strong>
-            Free Shipping
+            <strong>Need help?</strong>
+            support@heritagesparrow.com
           </div>
         </div>
       </div>
 
       <!-- FOOTER -->
       <div class="footer">
-        Need help? Contact us at <strong>support@heritagesparrow.com</strong>
+        If you have any questions, reply to this email or contact
+        <strong>support@heritagesparrow.com</strong>
       </div>
 
     </div>

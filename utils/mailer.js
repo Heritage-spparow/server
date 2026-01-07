@@ -5,22 +5,18 @@ let transporter;
 function getMailer() {
   if (!transporter) {
     transporter = nodemailer.createTransport({
-      host: "smtp.titan.email",
-      port:465,          // 🔴 IMPORTANT
-      secure: true,       // 🔴 IMPORTANT
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       auth: {
-        user: process.env.EMAIL_USER,      // support@heritagesparrow.com
-        pass: process.env.EMAIL_PASSWORD,  // NEW RESET PASSWORD
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD, // App Password
       },
     });
 
     console.log(
-      "📨 Mailer initialized:",
-      process.env.EMAIL_HOST,
-      process.env.EMAIL_USER,
-      process.env.EMAIL_PASSWORD,
-      process.env.EMAIL_FROM
-
+      "📨 Mailer initialized with Gmail:",
+      process.env.EMAIL_USER
     );
   }
 

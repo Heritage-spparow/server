@@ -40,7 +40,7 @@ const transports = [
     )
   })
 ];
-
+ 
 
 if (fs.existsSync(logDir)) {
   transports.push(
@@ -49,7 +49,7 @@ if (fs.existsSync(logDir)) {
       filename: path.join(logDir, 'combined-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
       maxSize: '20m',
-      maxFiles: '14d'
+      maxFiles: '14d' 
     })
   );
 }

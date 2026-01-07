@@ -10,10 +10,9 @@ const orderItemSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  image: {
+image: {
   type: String,
-  required: true,
-  default: "/placeholder.png"
+  required: true
 },
   price: {
     type: Number,

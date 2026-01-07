@@ -410,10 +410,10 @@ router.put(
 
       await product.save();
 
-      /* 🔥 CACHE INVALIDATION */
-      await redis.del("product_categories");
-      await redis.del(`product:${product._id}`);
-      await redis.flushall(); // clears product list cache safely
+      // /* 🔥 CACHE INVALIDATION */
+      // await redis.del("product_categories");
+      // await redis.del(`product:${product._id}`);
+      // await redis.flushall(); // clears product list cache safely
 
       res.status(200).json({
         success: true,
