@@ -1,280 +1,366 @@
-<%
-const formatCurrency = (amount) => `₹${Number(amount || 0).toFixed(2)}`;
-const formatDate = (date) => moment(date).format('MMM DD, YYYY');
-%>
+<% const formatCurrency = (amount) => `₹${Number(amount || 0).toFixed(2)}`;
+const formatDate = (date) => moment(date).format('MMM DD, YYYY'); %>
 
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Order Confirmation – Heritage Sparrow</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order Confirmation – Heritage Sparrow</title>
 
-<style>
-  body {
-    margin: 0;
-    padding: 0;
-    background-color: #f6f4ec;
-    font-family: Arial, Helvetica, sans-serif;
-    color: #2b2b2b;
-  }
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f6f4ec;
+        font-family: D-DIN, Arial, Helvetica, sans-serif;
+        color: #2b2b2b;
+      }
 
-  .wrapper {
-    width: 96%;
-    padding: 30px 12px;
-  }
+      .wrapper {
+        width: 93%;
+        padding: 30px 12px;
+      }
 
-  .container {
-    max-width: 640px;
-    margin: 0 auto;
-    background: #ffffff;
-    border-radius: 12px;
-    border: 1px solid #e6e6e6;
-    overflow: hidden;
-  }
+      .container {
+        max-width: 640px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #e6e6e6;
+        overflow: hidden;
+      }
 
-  .header {
-    padding: 26px 24px;
-    text-align: center;
-    border-bottom: 1px solid #eee;
-  }
+      .header {
+        padding: 26px 24px;
+        text-align: center;
+        border-bottom: 1px solid #eee;
+      }
 
-  .brand {
-    font-size: 18px;
-    letter-spacing: 0.12em;
-    font-weight: 600;
-  }
+      .brand {
+        font-size: 18px;
+        letter-spacing: 0.12em;
+        font-weight: 600;
+      }
 
-  .order-title {
-    margin-top: 16px;
-    font-size: 16px;
-    font-weight: 600;
-  }
+      .order-title {
+        margin-top: 16px;
+        font-size: 16px;
+        font-weight: 600;
+      }
 
-  .subtext {
-    margin-top: 8px;
-    font-size: 14px;
-    color: #666;
-  }
+      .subtext {
+        margin-top: 8px;
+        font-size: 14px;
+        color: #666;
+      }
 
-  .section {
-    padding: 22px 24px;
-  }
+      .section {
+        padding: 22px 24px;
+      }
 
-  .section-title {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 14px;
-  }
+      .row {
+        display: table;
+        width: 100%;
+        font-size: 14px;
+        margin-bottom: 6px;
+      }
 
-  .product-box {
-    border: 1px solid #e6e6e6;
-    border-radius: 10px;
-    padding: 14px;
-    display: table;
-    width: 95%;
-  }
+      .row span {
+        display: table-cell;
+      }
 
-  .product-img {
-    width: 90px;
-    vertical-align: top;
-  }
+      .row span:last-child {
+        text-align: right;
+      }
 
-  .product-img img {
-    width: 90px;
-    height: auto;
-    border-radius: 8px;
-  }
+      .section-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 14px;
+      }
 
-  .product-details {
-    padding-left: 14px;
-    vertical-align: top;
-  }
+      .product-box {
+        border: 1px solid #e6e6e6;
+        border-radius: 10px;
+        padding: 14px;
+        display: table;
+        width: 95%;
+        margin-bottom: 10px;
+      }
 
-  .product-name {
-    font-size: 14px;
-    font-weight: 600;
-  }
+      .product-img {
+        width: 90px;
+        display: table-cell;
+        vertical-align: top;
+      }
 
-  .product-meta {
-    font-size: 13px;
-    color: #666;
-    margin-top: 4px;
-  }
+      .product-img img {
+        width: 90px;
+        border-radius: 8px;
+      }
 
-  .price {
-    text-align: right;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
+      .product-details {
+        display: table-cell;
+        padding-left: 14px;
+        vertical-align: top;
+      }
 
-  .row {
-    display: table;
-    width: 100%;
-    font-size: 14px;
-    margin-bottom: 6px;
-  }
+      .product-name {
+        font-size: 14px;
+        font-weight: 600;
+      }
 
-  .row span {
-    display: table-cell;
-  }
+      .product-meta {
+        font-size: 13px;
+        color: #666;
+        margin-top: 4px;
+      }
 
-  .row span:last-child {
-    text-align: right;
-  }
+      .price {
+        display: table-cell;
+        text-align: right;
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        vertical-align: top;
+      }
 
-  .total {
-    font-size: 18px;
-    font-weight: 700;
-  }
+      .divider {
+        height: 1px;
+        background: #eee;
+        margin: 18px 0;
+      }
 
-  .divider {
-    height: 1px;
-    background: #eee;
-    margin: 18px 0;
-  }
+      .total {
+        font-size: 18px;
+        font-weight: 700;
+      }
 
-  .two-col {
-    display: table;
-    width: 100%;
-  }
+      .btn {
+        display: inline-block;
+        margin-top: 22px;
+        background: #5a8f3c;
+        color: #ffffff;
+        text-decoration: none;
+        padding: 12px 22px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+      }
 
-  .col {
-    display: table-cell;
-    width: 50%;
-    font-size: 13px;
-    vertical-align: top;
-  }
+      /* STATUS BAR */
+      .status-wrapper {
+        margin-top: 24px;
+      }
 
-  .col strong {
-    display: block;
-    margin-bottom: 6px;
-  }
+      .status-track {
+        display: table;
+        background: #fafafa;
+        border: 1px solid #e6e6e6;
+        border-radius: 4px;
+        padding: 8px 14px;
+        width: 100%;
+        margin-left: -14px;
+      }
 
-  .btn {
-    display: inline-block;
-    margin-top: 22px;
-    background: #5a8f3c;
-    color: #ffffff;
-    text-decoration: none;
-    padding: 12px 22px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-  }
+      .status-step {
+        display: table-cell;
+        text-align: center;
+        padding: 0 10px;
+        font-size: 11px;
+        color: #b5b5b5;
+      }
 
-  .footer {
-    text-align: center;
-    padding: 18px;
-    font-size: 12px;
-    color: #777;
-    background: #fafafa;
-  }
-</style>
-</head>
+      .status-step.active {
+        color: #5a8f3c;
+        font-weight: 600;
+      }
 
-<body>
-  <div class="wrapper">
-    <div class="container">
+      .status-icon {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 4px;
+      }
 
-      <!-- HEADER -->
-      <div class="header">
-        <div class="brand">HERITAGE SPARROW</div>
-        <div class="order-title">ORDER CONFIRMATION</div>
-        <p class="subtext">
-          <%= user.firstName %>, thank you for your order!  
-          We’ll notify you once your package is shipped.
-        </p>
-      </div>
+      .brand-signoff {
+        display: table;
+        width: 100%;
+        margin-top: 18px;
+      }
 
-      <!-- ORDER META -->
-      <div class="section">
-        <div class="row">
-          <span>Order number</span>
-          <span>#<%= order.orderNumber %></span>
+      .logo-cell {
+        display: table-cell;
+        text-align: right;
+        vertical-align: middle;
+      }
+
+      .logo-cell img {
+        max-width: 90px;
+        opacity: 0.85;
+      }
+
+      .two-col {
+        display: table;
+        width: 100%;
+      }
+
+      .col {
+        display: table-cell;
+        width: 50%;
+        font-size: 13px;
+        vertical-align: top;
+      }
+
+      .footer {
+        text-align: center;
+        padding: 18px;
+        font-size: 12px;
+        color: #777;
+        background: #fafafa;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrapper">
+      <div class="container">
+        <!-- HEADER -->
+        <div class="header">
+          <div class="brand">HERITAGE SPARROW</div>
+          <div class="order-title">ORDER CONFIRMATION</div>
+          <p class="subtext">
+            <%= user.firstName %>, thank you for your order! We’ll notify you
+            once your package is shipped.
+          </p>
         </div>
-        <div class="row">
-          <span>Order date</span>
-          <span><%= formatDate(order.createdAt) %></span>
-        </div>
-        <div class="row">
-          <span>Payment method</span>
-          <span><%= order.paymentMethod === "razorpay" ? "Online Payment" : "Cash on Delivery" %></span>
-        </div>
-      </div>
 
-      <!-- PRODUCT -->
-      <div class="section">
-        <div class="section-title">Order summary</div>
+        <!-- ORDER META -->
+        <div class="section">
+          <div class="row">
+            <span>Order number</span>
+            <span>#<%= order.orderNumber %></span>
+          </div>
+          <div class="row">
+            <span>Order date</span>
+            <span><%= formatDate(order.createdAt) %></span>
+          </div>
+          <div class="row">
+            <span>Payment method</span>
+            <span>
+              <%= order.paymentMethod === "razorpay" 
+               ? "Paid" 
+               : "Cash on Delivery" %>
+            </span>
+          </div>
+        </div>
 
-        <% order.orderItems.forEach(item => { %>
+        <!-- PRODUCTS -->
+        <div class="section">
+          <div class="section-title">Order summary</div>
+
+          <% order.orderItems.forEach(item => { %>
           <div class="product-box">
-            <div style="display: table-cell" class="product-img">
+            <div class="product-img">
               <img src="<%= item.image %>" alt="<%= item.name %>" />
             </div>
-            <div style="display: table-cell" class="product-details">
+            <div class="product-details">
               <div class="product-name"><%= item.name %></div>
               <div class="product-meta">Quantity: <%= item.quantity %></div>
             </div>
-            <div style="display: table-cell" class="price">
+            <div class="price">
               <%= formatCurrency(item.price * item.quantity) %>
             </div>
           </div>
-        <% }) %>
-      </div>
-
-      <!-- TOTALS -->
-      <div class="section">
-        <div class="row">
-          <span>Subtotal</span>
-          <span><%= formatCurrency(order.itemsPrice) %></span>
-        </div>
-        <div class="row">
-          <span>Shipping</span>
-          <span><%= formatCurrency(order.shippingPrice) %></span>
-        </div>
-        <div class="row">
-          <span>Taxes</span>
-          <span>All taxes are inclusive</span>
+          <% }) %>
         </div>
 
-        <div class="divider"></div>
-
-        <div class="row total">
-          <span>Total</span>
-          <span><%= formatCurrency(order.totalPrice) %></span>
-        </div>
-
-        <a href="https://www.heritagesparrow.com/order/<%= order._id %>" class="btn">
-          View order
-        </a>
-      </div>
-
-      <!-- ADDRESS -->
-      <div class="section">
-        <div class="two-col">
-          <div class="col">
-            <strong>Shipping address</strong>
-            <%= user.firstName %> <%= user.lastName %><br />
-            <%= order.shippingAddress.address %><br />
-            <%= order.shippingAddress.city %>, <%= order.shippingAddress.state %> <%= order.shippingAddress.postalCode %><br />
-            <%= order.shippingAddress.country %>
+        <!-- TOTALS -->
+        <div class="section">
+          <div class="row">
+            <span>Subtotal</span>
+            <span><%= formatCurrency(order.itemsPrice) %></span>
+          </div>
+          <div class="row">
+            <span>Shipping</span>
+            <span><%= formatCurrency(order.shippingPrice) %></span>
+          </div>
+          <div class="row">
+            <span>Taxes</span>
+            <span>All taxes are inclusive</span>
           </div>
 
-          <div class="col">
-            <strong>Shipping method</strong>
-            Free Shipping
+          <div class="divider"></div>
+
+          <div class="row total">
+            <span>Total</span>
+            <span><%= formatCurrency(order.totalPrice) %></span>
+          </div>
+
+          <a
+            href="https://www.heritagesparrow.com/order/<%= order._id %>"
+            class="btn"
+          >
+            View order
+          </a>
+
+          <!-- STATUS BAR -->
+          <div class="status-wrapper">
+            <div class="status-track">
+              <div
+                class="status-step <%= ['confirmed','shipped','delivered'].indexOf(order.status) !== -1 ? 'active' : '' %>"
+              >
+                <span class="status-icon">📦</span>
+                CONFIRMED
+              </div>
+              <div
+                class="status-step <%= ['shipped','delivered'].indexOf(order.status) !== -1 ? 'active' : '' %>"
+              >
+                <span class="status-icon">🚚</span>
+                SHIPPED
+              </div>
+              <div
+                class="status-step <%= order.status === 'delivered' ? 'active' : '' %>"
+              >
+                <span class="status-icon">✓</span>
+                DELIVERED
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- FOOTER -->
-      <div class="footer">
-        Need help? Contact us at <strong>support@heritagesparrow.com</strong>
-      </div>
+        <!-- ADDRESS -->
+        <div class="section">
+          <div class="two-col">
+            <div class="col">
+              <strong>Shipping address</strong><br />
+              <%= user.firstName %> <%= user.lastName %><br />
+              <%= order.shippingAddress.address %><br />
+              <%= order.shippingAddress.city %>, <%= order.shippingAddress.state
+              %> <%= order.shippingAddress.postalCode %><br />
+              <%= order.shippingAddress.country %>
+            </div>
 
+            <div class="col">
+              <strong>Shipping method</strong><br />
+              Free Shipping
+            </div>
+            <div class="brand-signoff">
+              <div class="logo-cell">
+                <img
+                  src="https://res.cloudinary.com/drcy8edfo/image/upload/v1767868958/heitageSparrow_ytb6xw.png"
+                  alt="Heritage Sparrow"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+          Need help? Contact us at <strong>support@heritagesparrow.com</strong>
+        </div>
+      </div>
     </div>
-  </div>
-</body>
+  </body>
 </html>

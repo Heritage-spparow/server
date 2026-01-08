@@ -10,6 +10,8 @@ const { emailQueue } = require('../queues/emailQueue');
 const PDFDocument = require('pdfkit');
 const path = require("path");
 const mongoose = require("mongoose");
+const generateInvoicePDF = require("../utils/generateInvoicePDF");
+const uploadInvoiceToCloudinary = require("../middleware/uploadInvoiceToCloudinary");
 
 // 📧 Email utils
 const ejs = require("ejs");
@@ -59,12 +61,6 @@ router.post("/razorpay", protect, async (req, res) => {
 });
 
 // @route   POST /api/orders/capture
-// @desc    Capture payment + create order only after successful payment
-// @access  Private
-// @route   POST /api/orders/capture
-// @desc    Capture Razorpay payment + create order + send confirmation email
-// @access  Private
-// @route   POST /api/orders/capture
 // @desc    Capture Razorpay payment + create order + send email
 // @access  Private
 router.post("/capture", protect, async (req, res) => {
@@ -88,32 +84,23 @@ router.post("/capture", protect, async (req, res) => {
       .digest("hex");
 
     if (expectedSignature !== signature) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid payment signature",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid payment signature" });
     }
 
+    /* ✅ VALIDATE STOCK */
     const items = [];
-
-    /* ✅ VALIDATE STOCK (SIZE-WISE) */
     for (const item of orderItems) {
       const product = await Product.findById(item.product);
 
-      if (!product || !product.active) {
-        return res.status(400).json({
-          success: false,
-          message: "Product not available",
-        });
-      }
-
       const sizeValue = Number(item.size);
-      const sizeObj = product.sizes.find((s) => s.size === sizeValue);
+      const sizeObj = product?.sizes.find((s) => s.size === sizeValue);
 
       if (!sizeObj || sizeObj.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${product.name} (size ${sizeValue})`,
+          message: `Insufficient stock for ${product.name}`,
         });
       }
 
@@ -128,7 +115,7 @@ router.post("/capture", protect, async (req, res) => {
       });
     }
 
-    /* ✅ CREATE PAID ORDER */
+    /* ✅ CREATE ORDER (FAST) */
     const order = await Order.create({
       user: req.user._id,
       orderItems: items,
@@ -146,10 +133,10 @@ router.post("/capture", protect, async (req, res) => {
       totalPrice,
       isPaid: true,
       paidAt: Date.now(),
-      status: "processing",
+      status: "confirmed",
     });
 
-    /* 🔻 REDUCE STOCK (SIZE-WISE) */
+    /* 🔻 REDUCE STOCK */
     for (const item of items) {
       await Product.updateOne(
         { _id: item.product, "sizes.size": item.size },
@@ -163,40 +150,74 @@ router.post("/capture", protect, async (req, res) => {
       { $set: { items: [], totalItems: 0, totalPrice: 0 } }
     );
 
-    /* 📧 SEND EMAIL (NON-BLOCKING) */
-    try {
-      const transporter = getMailer();
-      const templatePath = path.join(
-        __dirname,
-        "../templates/invoiceTemplate.ejs"
-      );
-
-      const htmlRaw = await ejs.renderFile(templatePath, {
-        order,
-        user: req.user,
-        moment,
-      });
-
-      const html = juice(htmlRaw);
-
-      await transporter.sendMail({
-        from: process.env.EMAIL_FROM,
-        to: req.user.email,
-        subject: `Order Confirmed – #${order.orderNumber}`,
-        html,
-      });
-
-      console.log("✅ Razorpay email sent:", req.user.email);
-    } catch (err) {
-      console.error("❌ Razorpay email failed:", err.message);
-    }
-
+    /* 🚀 RESPOND IMMEDIATELY (CRITICAL) */
     res.json({ success: true, order });
+
+    /* =================================================
+       ⏳ POST-RESPONSE ASYNC TASKS (NON-BLOCKING)
+       ================================================= */
+
+    setImmediate(async () => {
+      try {
+        /* 🧾 INVOICE */
+        const pdfBuffer = await generateInvoicePDF(order, req.user);
+
+        const invoiceData = await uploadInvoiceToCloudinary(
+          pdfBuffer,
+          order.orderNumber
+        );
+
+        order.invoice = {
+          url: invoiceData.url,
+          publicId: invoiceData.publicId,
+          generatedAt: new Date(),
+        };
+
+        await order.save();
+
+        console.log("✅ Razorpay invoice generated");
+
+        /* 📧 EMAIL */
+        const transporter = getMailer();
+        const templatePath = path.join(
+          __dirname,
+          "../templates/invoiceTemplate.ejs"
+        );
+
+        const htmlRaw = await ejs.renderFile(templatePath, {
+          order,
+          user: req.user,
+          moment,
+        });
+
+        const html = juice(htmlRaw);
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM,
+          to: req.user.email,
+          subject: `Order Confirmed – #${order.orderNumber}`,
+          html,
+          attachments: [
+            {
+              filename: `Invoice-${order.orderNumber}.pdf`,
+              path: invoiceData.url,
+            },
+          ],
+        });
+
+        console.log("✅ Razorpay email sent");
+      } catch (err) {
+        console.error("❌ Razorpay post-order task failed:", err);
+      }
+    });
+
   } catch (err) {
     console.error("❌ Capture failed:", err);
     res.status(500).json({ success: false });
   }
 });
+
+
 // @route   POST /api/orders/razorpay/verify
 // @desc    Verify Razorpay Payment Signature
 // @access  Private
@@ -285,7 +306,7 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
-    /* ✅ CREATE COD ORDER */
+    /* ✅ CREATE ORDER (FAST) */
     const order = await Order.create({
       user: req.user._id,
       orderItems: items,
@@ -295,7 +316,8 @@ router.post("/", protect, async (req, res) => {
       taxPrice,
       shippingPrice,
       totalPrice,
-      status: "pending",
+      status: "confirmed",
+      isPaid: false,
     });
 
     /* 🔻 REDUCE STOCK */
@@ -306,46 +328,80 @@ router.post("/", protect, async (req, res) => {
       );
     }
 
-    /* 🧹 CLEAR CART */
+    /* 🧹 CLEAR CART (FAST) */
     await Cart.findOneAndUpdate(
       { user: req.user._id },
       { $set: { items: [], totalItems: 0, totalPrice: 0 } }
     );
 
-    /* 📧 SEND EMAIL */
-    try {
-      const transporter = getMailer();
-      const templatePath = path.join(
-        __dirname,
-        "../templates/invoiceTemplate.ejs"
-      );
-
-      const htmlRaw = await ejs.renderFile(templatePath, {
-        order,
-        user: req.user,
-        moment,
-      });
-
-      const html = juice(htmlRaw);
-
-      await transporter.sendMail({
-        from: process.env.EMAIL_FROM,
-        to: req.user.email,
-        subject: `Order Confirmed (COD) – #${order.orderNumber}`,
-        html,
-      });
-
-      console.log("✅ COD email sent:", req.user.email);
-    } catch (err) {
-      console.error("❌ COD email failed:", err.message);
-    }
-
+    /* 🚀 RESPOND IMMEDIATELY (CRITICAL) */
     res.status(201).json({ success: true, order });
+
+    /* =================================================
+       ⏳ POST-RESPONSE ASYNC TASKS (NON-BLOCKING)
+       ================================================= */
+
+    setImmediate(async () => {
+      try {
+        /* 🧾 INVOICE */
+        const pdfBuffer = await generateInvoicePDF(order, req.user);
+
+        const invoiceData = await uploadInvoiceToCloudinary(
+          pdfBuffer,
+          order.orderNumber
+        );
+
+        order.invoice = {
+          url: invoiceData.url,
+          publicId: invoiceData.publicId,
+          generatedAt: new Date(),
+        };
+
+        await order.save();
+
+        console.log("✅ COD invoice generated");
+
+        /* 📧 EMAIL */
+        const transporter = getMailer();
+        const templatePath = path.join(
+          __dirname,
+          "../templates/invoiceTemplate.ejs"
+        );
+
+        const htmlRaw = await ejs.renderFile(templatePath, {
+          order,
+          user: req.user,
+          moment,
+        });
+
+        const html = juice(htmlRaw);
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM,
+          to: req.user.email,
+          subject: `Order Confirmed (COD) – #${order.orderNumber}`,
+          html,
+          attachments: [
+            {
+              filename: `Invoice-${order.orderNumber}.pdf`,
+              path: invoiceData.url,
+            },
+          ],
+        });
+
+        console.log("✅ COD email sent");
+      } catch (err) {
+        console.error("❌ Post-order async task failed:", err);
+      }
+    });
+
   } catch (err) {
     console.error("❌ COD order failed:", err);
     res.status(500).json({ success: false });
   }
 });
+
+
 
 
 
@@ -413,7 +469,7 @@ router.put('/:id/pay', protect, async (req, res) => {
 
     order.isPaid = true;
     order.paidAt = Date.now();
-    order.status = 'processing';
+    order.status = 'confirmed';
 
     order.paymentResult = {
       id: req.body.id,
@@ -431,7 +487,7 @@ router.put('/:id/pay', protect, async (req, res) => {
     const updatedOrder = await order.save();
 
     res.status(200).json({
-      success: true,
+      success: true, 
       message: 'Order updated to paid',
       order: updatedOrder
     });
@@ -580,7 +636,7 @@ router.get('/', protect, authorize('admin', 'manager', 'support'), async (req, r
    ============================================================ */
 
 router.put('/:id/status', protect, authorize('admin', 'manager', 'support'), [
-  body('status').isIn(['pending', 'processing', 'shipped', 'delivered', 'cancelled'])
+ body('status').isIn(['confirmed', 'shipped', 'delivered'])
 ], async (req, res) => {
   try {
     const { status, trackingNumber } = req.body;

@@ -409,7 +409,7 @@ router.put(
       ];
 
       await product.save();
-
+ 
       // /* 🔥 CACHE INVALIDATION */
       // await redis.del("product_categories");
       // await redis.del(`product:${product._id}`);

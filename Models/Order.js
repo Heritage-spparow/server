@@ -10,10 +10,10 @@ const orderItemSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-image: {
-  type: String,
-  required: true
-},
+  image: {
+    type: String,
+    required: true
+  },
   price: {
     type: Number,
     required: true
@@ -44,10 +44,10 @@ const shippingAddressSchema = new mongoose.Schema({
     type: String,
     required: true
   },
- phone:{
+  phone: {
     type: String,
     required: true
- },
+  },
   state: String
 });
 
@@ -66,11 +66,11 @@ const orderSchema = new mongoose.Schema({
   },
   orderItems: [orderItemSchema],
   shippingAddress: shippingAddressSchema,
-paymentMethod: {
+  paymentMethod: {
     type: String,
     enum: ["cod", "razorpay"],
     required: true,
-},
+  },
   paymentResult: paymentResultSchema,
   itemsPrice: {
     type: Number,
@@ -111,8 +111,8 @@ paymentMethod: {
   status: {
     type: String,
     required: true,
-    enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'],
-    default: 'pending'
+    enum: ['confirmed', 'shipped', 'delivered'],
+    default: 'confirmed'
   },
   orderNumber: {
     type: String,
@@ -123,6 +123,11 @@ paymentMethod: {
   },
   trackingNumber: {
     type: String
+  },
+  invoice: {
+    url: String,
+    publicId: String,
+    generatedAt: Date
   },
   createdAt: {
     type: Date,
@@ -135,7 +140,7 @@ paymentMethod: {
 });
 
 // Generate order number before saving
-orderSchema.pre('save', function(next) {
+orderSchema.pre('save', function (next) {
   if (!this.orderNumber) {
     this.orderNumber = 'ORD-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9).toUpperCase();
   }
