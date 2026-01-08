@@ -49,17 +49,18 @@ function splitGST(inclusiveAmount, isPunjab) {
 
 /* ================= MAIN PDF ================= */
 module.exports = async function generateInvoicePDF(order, user) {
-  /* ===== LOAD SIGNATURE IMAGE (BUFFER) ===== */
   let signatureBuffer = null;
+
   try {
     const imgRes = await axios.get(
       "https://res.cloudinary.com/drcy8edfo/image/upload/v1767876770/Screenshot_2026-01-08_at_6.22.29_PM_y6b9dy.png",
       { responseType: "arraybuffer" }
     );
     signatureBuffer = Buffer.from(imgRes.data);
-  } catch (err) {
-    console.warn("⚠️ Signature image failed, continuing without it");
+  } catch {
+    console.warn("⚠️ Signature image not loaded");
   }
+
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: "A4", margin: 40 });
@@ -68,112 +69,75 @@ module.exports = async function generateInvoicePDF(order, user) {
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-
       const isIndia = order.shippingAddress.country?.toLowerCase() === "india";
       const isPunjab = isIndia && order.shippingAddress.state?.toLowerCase() === "punjab";
 
       /* ================= HEADER ================= */
       doc.font("Helvetica-Bold").fontSize(18).text("HERITAGE SPARROW", 40, 40);
-      doc.fontSize(10).font("Helvetica-Bold")
-        .text("Tax Invoice / Bill of Supply / Cash Memo", 350, 40, { align: "right" });
-      doc.fontSize(9).font("Helvetica")
-        .text("(Original for Recipient)", 350, 55, { align: "right" });
+      doc.fontSize(10).text("Tax Invoice", 400, 40, { align: "right" });
 
       /* ================= SELLER ================= */
       let y = 90;
-      const leftX = 40;
-      const rightX = 330;
-
-      doc.font("Helvetica-Bold").fontSize(9).text("Sold By:", leftX, y);
+      doc.fontSize(9).font("Helvetica-Bold").text("Sold By:", 40, y);
       y += 14;
-      doc.font("Helvetica").text("Heritage Sparrow", leftX, y);
+      doc.font("Helvetica").text("Heritage Sparrow", 40, y);
       y += 14;
-      doc.text("Village Gurusar Jodha", leftX, y);
+      doc.text("Village Gurusar Jodha", 40, y);
       y += 14;
-      doc.text("Tehsil Malout, District Sri Muktsar Sahib", leftX, y);
+      doc.text("Sri Muktsar Sahib, Punjab - 152115", 40, y);
       y += 14;
-      doc.text("Punjab - 152115, India", leftX, y);
-      y += 14;
-      doc.text("GSTIN: 03OQCPS0310B1ZF", leftX, y);
+      doc.text("GSTIN: 03OQCPS0310B1ZF", 40, y);
 
       /* ================= BILLING ================= */
       let ry = 90;
-      doc.font("Helvetica-Bold").text("Billing Address:", rightX, ry);
+      doc.font("Helvetica-Bold").text("Billing Address:", 330, ry);
       ry += 14;
-      doc.font("Helvetica").text(user.name, rightX, ry);
+      doc.font("Helvetica").text(user.name, 330, ry);
       ry += 14;
-      doc.text(order.shippingAddress.address, rightX, ry, { width: 230 });
-      ry += 14;
+      doc.text(order.shippingAddress.address, 330, ry, { width: 230 });
+      ry += 28;
       doc.text(
         `${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.postalCode}`,
-        rightX,
+        330,
         ry
       );
       ry += 14;
-      doc.text(order.shippingAddress.country, rightX, ry);
-      ry += 14;
-      doc.text(`State/UT Code: ${isPunjab ? "03" : "Other"}`, rightX, ry);
-
-      /* ================= SHIPPING ================= */
-      ry += 24;
-      doc.font("Helvetica-Bold").text("Shipping Address:", rightX, ry);
-      ry += 14;
-      doc.font("Helvetica").text(user.name, rightX, ry);
-      ry += 14;
-      doc.text(order.shippingAddress.address, rightX, ry, { width: 230 });
-      ry += 14;
-      doc.text(
-        `${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.postalCode}`,
-        rightX,
-        ry
-      );
-      ry += 14;
-      doc.text(order.shippingAddress.country, rightX, ry); 
-      ry += 14;
-      doc.text(`Place of Supply: ${order.shippingAddress.state}`, rightX, ry);
-      ry += 14;
-      doc.text(`Place of Delivery: ${order.shippingAddress.state}`, rightX, ry);
+      doc.text(order.shippingAddress.country, 330, ry);
 
       /* ================= ORDER META ================= */
-      ry += 24;
-      doc.text(`Order No: ${order.orderNumber}`, rightX, ry);
+      ry += 20;
+      doc.text(`Order No: ${order.orderNumber}`, 330, ry);
       ry += 14;
-      doc.text(`Order Date: ${moment(order.createdAt).format("DD/MM/YYYY")}`, rightX, ry);
-      ry += 14;
-      doc.text(`Invoice No: INV-${order.orderNumber}`, rightX, ry);
-      ry += 14;
-      doc.text(`Invoice Date: ${moment(order.createdAt).format("DD/MM/YYYY")}`, rightX, ry);
+      doc.text(`Order Date: ${moment(order.createdAt).format("DD/MM/YYYY")}`, 330, ry);
 
-      /* ================= TABLE ================= */
-      let tableY = 430;
+      /* ================= TABLE HEADER ================= */
+      let tableY = 360;
 
       const col = {
         sl: 40,
         desc: 65,
-        unit: 270,
-        qty: 320,
-        net: 360,
-        cgst: 410,
-        sgst: 455,
-        igst: 500,
-        total: 540,
+        qty: 300,
+        unit: 330,
+        cgst: 380,
+        sgst: 430,
+        igst: 480,
+        total: 530,
       };
 
       doc.font("Helvetica-Bold").fontSize(8);
       doc.text("Sl", col.sl, tableY);
       doc.text("Description", col.desc, tableY);
-      doc.text("Unit", col.unit, tableY);
-      doc.text("Qty", col.qty, tableY);
-      doc.text("Net", col.net, tableY);
-      doc.text("CGST", col.cgst, tableY);
-      doc.text("SGST", col.sgst, tableY);
-      doc.text("IGST", col.igst, tableY);
-      doc.text("Total", col.total, tableY);
+      doc.text("Qty", col.qty, tableY, { width: 30, align: "center" });
+      doc.text("Price", col.unit, tableY, { width: 45, align: "right" });
+      doc.text("CGST", col.cgst, tableY, { width: 45, align: "right" });
+      doc.text("SGST", col.sgst, tableY, { width: 45, align: "right" });
+      doc.text("IGST", col.igst, tableY, { width: 45, align: "right" });
+      doc.text("Total", col.total, tableY, { width: 55, align: "right" });
 
       doc.moveTo(40, tableY + 12).lineTo(560, tableY + 12).stroke();
 
       /* ================= ROWS ================= */
-      let rowY = tableY + 18;
+      let rowY = tableY + 20;
       let totalNet = 0, totalCgst = 0, totalSgst = 0, totalIgst = 0;
 
       doc.font("Helvetica").fontSize(8);
@@ -181,7 +145,6 @@ module.exports = async function generateInvoicePDF(order, user) {
       order.orderItems.forEach((item, i) => {
         const inclusiveTotal = item.price * item.quantity;
         const { net, cgst, sgst, igst } = splitGST(inclusiveTotal, isPunjab);
-
         const rowTotal = net + cgst + sgst + igst;
 
         totalNet += net;
@@ -190,54 +153,20 @@ module.exports = async function generateInvoicePDF(order, user) {
         totalIgst += igst;
 
         doc.text(i + 1, col.sl, rowY);
-        doc.text(`${item.name}\nHSN: 6403`, col.desc, rowY, { width: 180 });
-        doc.text(`₹${item.price.toFixed(2)}`, col.unit, rowY, { align: "right" });
-        doc.text(item.quantity, col.qty, rowY, { align: "center" });
-        doc.text(`₹${net.toFixed(2)}`, col.net, rowY, { align: "right" });
-        doc.text(`₹${cgst.toFixed(2)}`, col.cgst, rowY, { align: "right" });
-        doc.text(`₹${sgst.toFixed(2)}`, col.sgst, rowY, { align: "right" });
-        doc.text(`₹${igst.toFixed(2)}`, col.igst, rowY, { align: "right" });
-        doc.text(`₹${rowTotal.toFixed(2)}`, col.total, rowY, { align: "right" });
+        doc.text(`${item.name}\nHSN: 6403`, col.desc, rowY, { width: 220 });
+        doc.text(item.quantity, col.qty, rowY, { width: 30, align: "center" });
+        doc.text(`₹${item.price.toFixed(2)}`, col.unit, rowY, { width: 45, align: "right" });
+        doc.text(`₹${cgst.toFixed(2)}`, col.cgst, rowY, { width: 45, align: "right" });
+        doc.text(`₹${sgst.toFixed(2)}`, col.sgst, rowY, { width: 45, align: "right" });
+        doc.text(`₹${igst.toFixed(2)}`, col.igst, rowY, { width: 45, align: "right" });
+        doc.text(`₹${rowTotal.toFixed(2)}`, col.total, rowY, { width: 55, align: "right" });
 
-        rowY += 34;
+        rowY += 36;
       });
 
-      /* ================= TOTALS ================= */
-      rowY += 10;
-      doc.moveTo(340, rowY).lineTo(560, rowY).stroke();
-      rowY += 10;
-
-      doc.font("Helvetica-Bold");
-      doc.text("Net Amount:", 340, rowY);
-      doc.text(`₹${totalNet.toFixed(2)}`, col.total, rowY, { align: "right" });
-      rowY += 14;
-
-      doc.text("Shipping:", 340, rowY);
-      doc.text(`₹${order.shippingPrice.toFixed(2)}`, col.total, rowY, { align: "right" });
-      rowY += 14;
-
-      doc.font("Helvetica");
-      doc.text("CGST (9%):", 340, rowY);
-      doc.text(`₹${totalCgst.toFixed(2)}`, col.total, rowY, { align: "right" });
-      rowY += 14;
-
-      doc.text("SGST (9%):", 340, rowY);
-      doc.text(`₹${totalSgst.toFixed(2)}`, col.total, rowY, { align: "right" });
-      rowY += 14;
-
-      doc.text("IGST (18%):", 340, rowY);
-      doc.text(`₹${totalIgst.toFixed(2)}`, col.total, rowY, { align: "right" });
-      rowY += 14;
-
-      doc.moveTo(340, rowY).lineTo(560, rowY).stroke();
-      rowY += 10;
-
-      doc.font("Helvetica-Bold");
-      doc.text("TOTAL AMOUNT:", 340, rowY);
-      doc.text(`₹${order.totalPrice.toFixed(2)}`, col.total, rowY, { align: "right" });
 
       /* ================= AMOUNT IN WORDS ================= */
-      rowY += 30;
+      rowY += 24;
       doc.font("Helvetica-Bold").text("Amount in Words:", 40, rowY);
       rowY += 14;
       doc.font("Helvetica").text(amountInWords(order.totalPrice), 40, rowY);
@@ -252,8 +181,7 @@ module.exports = async function generateInvoicePDF(order, user) {
         rowY += 40;
       }
 
-      rowY += 40;
-      doc.text("Authorized Signatory", 420, rowY);
+      doc.text("Authorized Signatory", 420, rowY + 20);
 
       doc.end();
     } catch (err) {
