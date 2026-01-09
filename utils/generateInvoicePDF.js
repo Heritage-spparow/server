@@ -128,10 +128,10 @@ module.exports = async function generateInvoicePDF(order, user) {
       doc.text("Sl", col.sl, tableY);
       doc.text("Description", col.desc, tableY);
       doc.text("Qty", col.qty, tableY, { width: 30, align: "center" });
-      doc.text("Price", col.unit, tableY, { width: 45, align: "right" });
-      doc.text("CGST", col.cgst, tableY, { width: 45, align: "right" });
-      doc.text("SGST", col.sgst, tableY, { width: 45, align: "right" });
-      doc.text("IGST", col.igst, tableY, { width: 45, align: "right" });
+      doc.text("SUBTOTAL", col.unit, tableY, { width: 45, align: "right" });
+      doc.text("CGST(9%)", col.cgst, tableY, { width: 45, align: "right" });
+      doc.text("SGST(9%)", col.sgst, tableY, { width: 45, align: "right" });
+      doc.text("IGST(18%)", col.igst, tableY, { width: 45, align: "right" });
       doc.text("Total", col.total, tableY, { width: 55, align: "right" });
 
       doc.moveTo(40, tableY + 12).lineTo(560, tableY + 12).stroke();
@@ -153,9 +153,9 @@ module.exports = async function generateInvoicePDF(order, user) {
         totalIgst += igst;
 
         doc.text(i + 1, col.sl, rowY);
-        doc.text(`${item.name}\nHSN: 6403`, col.desc, rowY, { width: 220 });
+        doc.text(`${item.name}`, col.desc, rowY, { width: 220 });
         doc.text(item.quantity, col.qty, rowY, { width: 30, align: "center" });
-        doc.text(`₹${item.price.toFixed(2)}`, col.unit, rowY, { width: 45, align: "right" });
+        doc.text(`₹${net.toFixed(2)}`, col.unit, rowY, { width: 45, align: "right" });
         doc.text(`₹${cgst.toFixed(2)}`, col.cgst, rowY, { width: 45, align: "right" });
         doc.text(`₹${sgst.toFixed(2)}`, col.sgst, rowY, { width: 45, align: "right" });
         doc.text(`₹${igst.toFixed(2)}`, col.igst, rowY, { width: 45, align: "right" });
