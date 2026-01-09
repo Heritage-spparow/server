@@ -40,6 +40,8 @@ const productRoutes = require("./Routes/ProductsEnhanced");
 const cartRoutes = require("./Routes/Cart");
 const orderRoutes = require("./Routes/Order");
 const adminRoutes = require("./Routes/Admin");
+const landingRoutes = require("./Routes/landing");
+
 
 /* =====================================================
    APP
@@ -184,6 +186,7 @@ app.use("/api/products-enhanced", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/landing", landingRoutes);
 
 /* =====================================================
    ROOT
