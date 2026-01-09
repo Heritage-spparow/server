@@ -328,6 +328,7 @@ if (useCluster && cluster.isMaster) {
       app.use('/api/cart', cartRoutes);
       app.use('/api/orders', orderRoutes);
       app.use('/api/products-enhanced', productRoutes);
+      app.use("/api/landing", require("./Routes/landing"));
 
       // Admin routes
       app.use('/api/admin', adminRoutes);

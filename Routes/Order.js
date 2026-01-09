@@ -114,8 +114,6 @@ router.post("/capture", protect, async (req, res) => {
         color: item.color,
       });
     }
-
-    /* ✅ CREATE ORDER (FAST) */
     const order = await Order.create({
       user: req.user._id,
       orderItems: items,
