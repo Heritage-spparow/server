@@ -248,7 +248,7 @@ router.post(
       });
 
       /* 🔥 CACHE INVALIDATION */
-      const redis = getRedis();
+      const redis = getRedis(); 
       if (redis) {
         await redis.del("product_categories");
         await redis.del(`product:${product._id}`);

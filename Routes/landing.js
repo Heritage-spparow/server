@@ -2,13 +2,42 @@ const express = require("express");
 const router = express.Router();
 const LandingPage = require("../Models/LandingPage");
 const upload = require("../middleware/upload");
+const getRedis = require("../utils/redis");
 
 /* ================= PUBLIC ================= */
 router.get("/", async (req, res) => {
-  const landing = await LandingPage.findOne({ active: true })
-    .populate("sectionTwo.items.productId", "name");
-  res.json({ landing });
+  try {
+    const redis = getRedis();
+    const cacheKey = "landing:active";
+
+    // ✅ 1. Check cache
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return res.json({
+          landing: JSON.parse(cached),
+          cached: true,
+        });
+      }
+    }
+
+    // ✅ 2. DB fetch
+    const landing = await LandingPage.findOne({ active: true })
+      .populate("sectionTwo.items.productId", "name")
+      .lean();
+
+    // ✅ 3. Save to cache
+    if (redis && landing) {
+      await redis.setex(cacheKey, 300, JSON.stringify(landing)); // 5 min
+    }
+
+    res.json({ landing, cached: false });
+  } catch (err) {
+    console.error("❌ Landing fetch error:", err);
+    res.status(500).json({ success: false });
+  }
 });
+
 
 /* ================= ADMIN ================= */
 router.post(
@@ -21,7 +50,7 @@ router.post(
   async (req, res) => {
     try {
       const {
-        sectionOneCategory, 
+        sectionOneCategory,
         sectionOneCta,
         sectionTwoCta,
         sectionThreeLink,
@@ -37,9 +66,9 @@ router.post(
         label: item.label,
         image: carouselFiles[index]
           ? {
-              url: carouselFiles[index].path,
-              publicId: carouselFiles[index].filename,
-            }
+            url: carouselFiles[index].path,
+            publicId: carouselFiles[index].filename,
+          }
           : item.image,
       }));
 
@@ -49,9 +78,9 @@ router.post(
           ctaLabel: sectionOneCta,
           image: req.files.sectionOneImage
             ? {
-                url: req.files.sectionOneImage[0].path,
-                publicId: req.files.sectionOneImage[0].filename,
-              }
+              url: req.files.sectionOneImage[0].path,
+              publicId: req.files.sectionOneImage[0].filename,
+            }
             : undefined,
         },
         sectionTwo: {
@@ -63,9 +92,9 @@ router.post(
           ctaLabel: sectionThreeCta,
           image: req.files.sectionThreeImage
             ? {
-                url: req.files.sectionThreeImage[0].path,
-                publicId: req.files.sectionThreeImage[0].filename,
-              }
+              url: req.files.sectionThreeImage[0].path,
+              publicId: req.files.sectionThreeImage[0].filename,
+            }
             : undefined,
         },
       };
@@ -73,8 +102,8 @@ router.post(
       const existing = await LandingPage.findOne();
       const landing = existing
         ? await LandingPage.findByIdAndUpdate(existing._id, payload, {
-            new: true,
-          })
+          new: true,
+        })
         : await LandingPage.create(payload);
 
       res.json({ success: true, landing });
