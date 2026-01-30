@@ -78,6 +78,7 @@ const allowedOrigins = new Set([
 
   // Vercel preview / fallback
   "https://heritage-spparow-client.vercel.app",
+  "https://admin-pannel-mu-ten.vercel.app" ,
 
   process.env.CLIENT_URL,
 ]);
