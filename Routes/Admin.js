@@ -1,142 +1,283 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const mongoose = require('mongoose');
-const { protect, authorize } = require('../middleware/auth');
-const Order = require('../Models/Order');
-const Product = require('../Models/Product');
-const User = require('../Models/User');
+const mongoose = require("mongoose");
+const { protect, authorize } = require("../middleware/auth");
 
-// All admin routes require auth
+const Order = require("../Models/Order");
+const Product = require("../Models/Product");
+const User = require("../Models/User");
+const AboutPage = require("../Models/AboutPage");
+const upload = require("../middleware/upload");
+
+/* =====================================================
+   ALL ADMIN ROUTES REQUIRE AUTH
+===================================================== */
 router.use(protect);
 
-// Overview stats
-// GET /api/admin/overview
-router.get('/overview', authorize('admin', 'manager', 'support'), async (req, res) => {
+/* =====================================================
+   🌍 PUBLIC ABOUT PAGE (Frontend)
+   GET /api/admin/about
+===================================================== */
+router.get("/about", async (req, res) => {
   try {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - 7);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const about = await AboutPage.findOne();
+    res.json({ success: true, data: about });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
-    // Sales totals (paid orders)
-    const [todayAgg, weekAgg, monthAgg, statusAgg, topProducts] = await Promise.all([
-      Order.aggregate([
-        { $match: { isPaid: true, createdAt: { $gte: startOfToday } } },
-        { $group: { _id: null, revenue: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
-      ]),
-      Order.aggregate([
-        { $match: { isPaid: true, createdAt: { $gte: startOfWeek } } },
-        { $group: { _id: null, revenue: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
-      ]),
-      Order.aggregate([
+/* =====================================================
+   ✏️ CREATE / UPDATE ABOUT PAGE (ADMIN)
+   POST /api/admin/about
+===================================================== */
+router.post(
+  "/upload",
+  authorize("admin"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: "about" },
+        (err, result) => {
+          if (err) {
+            return res.status(500).json({ success: false });
+          }
+          res.json({ success: true, url: result.secure_url });
+        }
+      );
+
+      stream.end(req.file.buffer);
+    } catch (err) {
+      res.status(500).json({ success: false });
+    }
+  }
+);
+
+/* =====================================================
+   ADMIN DASHBOARD OVERVIEW
+===================================================== */
+router.get(
+  "/overview",
+  authorize("admin", "manager", "support"),
+  async (req, res) => {
+    try {
+      const startOfMonth = new Date(
+        new Date().getFullYear(),
+        new Date().getMonth(),
+        1
+      );
+
+      const monthAgg = await Order.aggregate([
         { $match: { isPaid: true, createdAt: { $gte: startOfMonth } } },
-        { $group: { _id: null, revenue: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
-      ]),
-      Order.aggregate([
-        { $group: { _id: '$status', count: { $sum: 1 } } },
-      ]),
-      Order.aggregate([
-        { $unwind: '$orderItems' },
-        { $group: { _id: '$orderItems.product', qty: { $sum: '$orderItems.quantity' }, revenue: { $sum: { $multiply: ['$orderItems.price', '$orderItems.quantity'] } } } },
-        { $sort: { revenue: -1 } },
-        { $limit: 5 },
-        { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
-        { $unwind: '$product' },
-        { $project: { _id: 0, productId: '$product._id', name: '$product.name', revenue: 1, qty: 1 } },
-      ]),
-    ]);
+        {
+          $group: {
+            _id: null,
+            revenue: { $sum: "$totalPrice" },
+            orders: { $sum: 1 },
+          },
+        },
+      ]);
 
-    // Low stock count
-    const lowStockCount = await Product.countDocuments({ active: true, stock: { $lte: 10 } });
+      const statusAgg = await Order.aggregate([
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]);
 
-    res.json({
-      success: true,
-      sales: {
-        today: { revenue: todayAgg[0]?.revenue || 0, orders: todayAgg[0]?.count || 0 },
-        week: { revenue: weekAgg[0]?.revenue || 0, orders: weekAgg[0]?.count || 0 },
-        month: { revenue: monthAgg[0]?.revenue || 0, orders: monthAgg[0]?.count || 0 },
-      },
-      ordersOverview: statusAgg.reduce((acc, s) => { acc[s._id] = s.count; return acc; }, {}),
-      bestSelling: topProducts,
-      lowStockCount,
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+      const ordersOverview = statusAgg.reduce((acc, s) => {
+        acc[s._id] = s.count;
+        return acc;
+      }, {});
+
+      const activeProducts = await Product.countDocuments({ active: true });
+
+      const lowStockCount = await Product.countDocuments({
+        active: true,
+        sizes: { $elemMatch: { stock: { $lte: 5 } } },
+      });
+
+      res.json({
+        success: true,
+        sales: {
+          month: {
+            revenue: monthAgg[0]?.revenue || 0,
+            orders: monthAgg[0]?.orders || 0,
+          },
+        },
+        ordersOverview,
+        activeProducts,
+        lowStockCount,
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
   }
-});
+);
 
-// Low stock list
-// GET /api/admin/inventory/low-stock
-router.get('/inventory/low-stock', authorize('admin', 'manager'), async (req, res) => {
-  try {
-    const threshold = parseInt(req.query.threshold) || 10;
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const products = await Product.find({ active: true, stock: { $lte: threshold } })
-      .sort({ stock: 1 })
-      .limit(limit)
-      .lean();
-    res.json({ success: true, products });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+/* =====================================================
+   ⭐ ADMINS LIST
+===================================================== */
+router.get(
+  "/admins",
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const admins = await User.find(
+        { role: "admin" },
+        { password: 0, resetPasswordToken: 0, resetPasswordExpire: 0 }
+      ).sort({ createdAt: -1 });
+
+      res.json({ success: true, admins });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Failed to fetch admins" });
+    }
   }
-});
+);
 
-// Customers list with order stats
-// GET /api/admin/customers
-router.get('/customers', authorize('admin'), async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const skip = (page - 1) * limit;
+/* =====================================================
+   🔔 NEW ORDERS NOTIFICATIONS
+===================================================== */
+router.get(
+  "/notifications/orders",
+  authorize("admin", "manager", "support"),
+  async (req, res) => {
+    try {
+      const since = req.query.since
+        ? new Date(req.query.since)
+        : new Date(Date.now() - 60 * 1000);
 
-    const pipeline = [
-      { $group: { _id: '$user', orders: { $sum: 1 }, totalSpend: { $sum: '$totalPrice' } } },
-      { $sort: { totalSpend: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
-      { $unwind: '$user' },
-      { $project: { _id: 0, userId: '$user._id', name: { $concat: ['$user.firstName', ' ', '$user.lastName'] }, email: '$user.email', orders: 1, totalSpend: 1 } },
-    ];
+      const newOrders = await Order.find({
+        createdAt: { $gt: since },
+      })
+        .select("_id orderNumber totalPrice createdAt")
+        .sort({ createdAt: -1 })
+        .limit(5);
 
-    const [rows, totalAgg] = await Promise.all([
-      Order.aggregate(pipeline),
-      Order.aggregate([{ $group: { _id: '$user' } }, { $count: 'total' }]),
-    ]);
-
-    const total = totalAgg[0]?.total || 0;
-
-    res.json({ success: true, customers: rows, pagination: { current: page, pages: Math.ceil(total / limit), total } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+      res.json({
+        success: true,
+        count: newOrders.length,
+        orders: newOrders,
+        now: new Date(),
+      });
+    } catch (err) {
+      res.status(500).json({ success: false });
+    }
   }
-});
+);
 
-// Sales report
-// GET /api/admin/reports/sales?granularity=day&start=ISO&end=ISO
-router.get('/reports/sales', authorize('admin'), async (req, res) => {
-  try {
-    const granularity = ['day', 'week', 'month'].includes(req.query.granularity) ? req.query.granularity : 'day';
-    const start = req.query.start ? new Date(req.query.start) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const end = req.query.end ? new Date(req.query.end) : new Date();
+/* =====================================================
+   TOGGLE ADMIN STATUS
+===================================================== */
+router.put(
+  "/admins/:id/status",
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const admin = await User.findById(req.params.id);
 
-    const data = await Order.aggregate([
-      { $match: { isPaid: true, createdAt: { $gte: start, $lte: end } } },
-      { $group: { _id: { $dateTrunc: { date: '$createdAt', unit: granularity } }, revenue: { $sum: '$totalPrice' }, orders: { $sum: 1 } } },
-      { $sort: { '_id': 1 } },
-      { $project: { date: '$_id', revenue: 1, orders: 1, _id: 0 } },
-    ]);
+      if (!admin || admin.role !== "admin") {
+        return res.status(404).json({ success: false, message: "Admin not found" });
+      }
 
-    res.json({ success: true, data });
-  } catch (err) { 
-    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+      if (admin._id.toString() === req.user._id.toString()) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot suspend yourself",
+        });
+      }
+
+      admin.accountStatus =
+        admin.accountStatus === "active" ? "suspended" : "active";
+
+      await admin.save();
+
+      res.json({ success: true, status: admin.accountStatus });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
   }
-});
+);
 
-// Notifications (placeholder)
-router.get('/notifications', authorize('admin', 'manager', 'support'), async (req, res) => {
-  res.json({ success: true, notifications: [] });
-});
+/* =====================================================
+   DELETE ADMIN
+===================================================== */
+router.delete(
+  "/admins/:id",
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      if (req.params.id === req.user._id.toString()) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot delete yourself",
+        });
+      }
+
+      const admin = await User.findOneAndDelete({
+        _id: req.params.id,
+        role: "admin",
+      });
+
+      if (!admin) {
+        return res.status(404).json({ success: false, message: "Admin not found" });
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+);
+
+/* =====================================================
+   CUSTOMERS LIST
+===================================================== */
+router.get(
+  "/customers",
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const customers = await User.find(
+        { role: "user" },
+        { password: 0 }
+      ).sort({ createdAt: -1 });
+
+      res.json({ success: true, customers });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+);
+
+/* =====================================================
+   SALES REPORT
+===================================================== */
+router.get(
+  "/reports/sales",
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const data = await Order.aggregate([
+        { $match: { isPaid: true } },
+        {
+          $group: {
+            _id: {
+              $dateTrunc: {
+                date: "$createdAt",
+                unit: "day",
+              },
+            },
+            revenue: { $sum: "$totalPrice" },
+            orders: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]);
+
+      res.json({ success: true, data });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+);
 
 module.exports = router;
