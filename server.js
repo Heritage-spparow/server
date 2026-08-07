@@ -227,9 +227,11 @@ if (useCluster && cluster.isMaster) {
   redisClient.on('end', () => logger.warn('Redis client connection closed'));
 
   // Rate limiting (applied after CORS) with Redis store
+  // DEVELOPMENT: Increased limits (1000 req/15min for testing)
+  // Production: Reduce to max: 100 for stricter limiting
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 1000, // Increased from 100 for development testing
     standardHeaders: true,
     legacyHeaders: false,
     message: 'Too many requests from this IP, please try again later.',
@@ -248,8 +250,8 @@ if (useCluster && cluster.isMaster) {
   // Speed limiter for repeated requests
   const speedLimiter = slowDown({
     windowMs: 15 * 60 * 1000,
-    delayAfter: 50,
-    delayMs: () => 500,
+    delayAfter: 200, // Increased from 50 for development
+    delayMs: () => 100, // Reduced delay from 500ms
     skip: (req) => {
 
       return req.method === 'OPTIONS';
@@ -329,6 +331,7 @@ if (useCluster && cluster.isMaster) {
       app.use('/api/orders', orderRoutes);
       app.use('/api/products-enhanced', productRoutes);
       app.use("/api/landing", require("./Routes/landing"));
+      app.use("/api/collections" , require("./Routes/collections") );
 
       // Admin routes
       app.use('/api/admin', adminRoutes);
@@ -367,7 +370,7 @@ if (useCluster && cluster.isMaster) {
             },
             cart: {
               get: 'GET /api/cart',
-              add: 'POST /api/cart/add',
+              add: 'POST /api/cart/add', 
               update: 'PUT /api/cart/item/:itemId',
               remove: 'DELETE /api/cart/item/:itemId',
               clear: 'DELETE /api/cart/clear',

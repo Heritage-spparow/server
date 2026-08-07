@@ -28,7 +28,10 @@ const productSchema = new mongoose.Schema(
       required: true,
       validate: [(v) => v.length > 0, "At least one size is required"],
     },
-
+    type: {
+      type: String,
+      default: "Jutti"
+    },
     /** ✅ MAIN COVER IMAGE */
     coverImage: {
       type: imageSchema,

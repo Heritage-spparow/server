@@ -1,10 +1,14 @@
 const express = require("express");
 const router = express.Router();
+
 const LandingPage = require("../Models/LandingPage");
 const upload = require("../middleware/upload");
 const getRedis = require("../utils/redis");
 
-/* ================= PUBLIC ================= */
+/* =====================================================
+   PUBLIC
+===================================================== */
+
 router.get("/", async (req, res) => {
   try {
     const redis = getRedis();
@@ -12,8 +16,10 @@ router.get("/", async (req, res) => {
 
     if (redis) {
       const cached = await redis.get(cacheKey);
+
       if (cached) {
         return res.json({
+          success: true,
           landing: JSON.parse(cached),
           cached: true,
         });
@@ -23,132 +29,147 @@ router.get("/", async (req, res) => {
     const landing = await LandingPage.findOne({ active: true })
       .populate(
         "sectionTwo.items.productId",
-        "name slug category categorySlug"
+        "name slug category type collection coverImage price"
       )
       .lean();
 
-    if (redis && landing) {
+    if (landing && redis) {
       await redis.setex(cacheKey, 300, JSON.stringify(landing));
     }
 
-    res.json({ landing, cached: false });
+    return res.json({
+      success: true,
+      landing,
+      cached: false,
+    });
   } catch (err) {
-    console.error("❌ Landing fetch error:", err);
-    res.status(500).json({ success: false });
+    console.error("Landing fetch error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch landing page.",
+    });
   }
 });
 
-/* ================= ADMIN ================= */
+/* =====================================================
+   ADMIN
+===================================================== */
+
 router.post(
   "/",
   upload.fields([
-    { name: "sectionOneImage", maxCount: 1 },
-    { name: "sectionThreeImage", maxCount: 1 },
-    { name: "carouselImages", maxCount: 10 },
+    {
+      name: "sectionOneCoverImage",
+      maxCount: 1,
+    },
+    {
+      name: "sectionThreeImage",
+      maxCount: 1,
+    },
+    {
+      name: "carouselImages",
+      maxCount: 20,
+    },
   ]),
   async (req, res) => {
     try {
       const {
-        sectionOneCategory,
+        sectionOneCollection,
         sectionOneCta,
+
         sectionTwoCta,
+        carouselItems,
+
         sectionThreeLink,
         sectionThreeCta,
-        carouselItems,
       } = req.body;
 
       const parsedItems = JSON.parse(carouselItems || "[]");
+
       const carouselFiles = req.files.carouselImages || [];
 
-      /* ================= CAROUSEL IMAGE MIGRATION ================= */
-      const items = await Promise.all(
-        parsedItems.map(async (item, index) => {
-          // New image uploaded
-          if (carouselFiles[index]) {
-            return {
-              productId: item.productId,
-              label: item.label,
-              image: {
-                url: carouselFiles[index].path,
-                publicId: carouselFiles[index].filename,
-              },
-            };
-          }
+      const items = parsedItems.map((item, index) => ({
+        productId: item.productId,
+        label: item.label,
 
-          // Auto migrate old cloudinary image
-          if (item.image?.url) {
-            if (!item.image.url.includes(process.env.CLOUDINARY_CLOUD_NAME)) {
-              const uploaded = await uploadFromUrl(item.image.url);
-              return {
-                ...item,
-                image: {
-                  url: uploaded.secure_url,
-                  publicId: uploaded.public_id,
-                },
-              };
+        image: carouselFiles[index]
+          ? {
+              url: carouselFiles[index].path,
+              publicId: carouselFiles[index].filename,
             }
-          }
+          : item.image,
+      }));
 
-          return item;
-        })
-      );
+      let coverImage;
 
-      /* ================= SECTION ONE IMAGE ================= */
-      let sectionOneImage;
-      if (req.files.sectionOneImage?.length) {
-        sectionOneImage = {
-          url: req.files.sectionOneImage[0].path,
-          publicId: req.files.sectionOneImage[0].filename,
+      if (req.files.sectionOneCoverImage?.length) {
+        coverImage = {
+          url: req.files.sectionOneCoverImage[0].path,
+          publicId: req.files.sectionOneCoverImage[0].filename,
         };
       }
 
-      /* ================= SECTION THREE IMAGE ================= */
-      let sectionThreeImage;
+      let campaignImage;
+
       if (req.files.sectionThreeImage?.length) {
-        sectionThreeImage = {
+        campaignImage = {
           url: req.files.sectionThreeImage[0].path,
           publicId: req.files.sectionThreeImage[0].filename,
         };
       }
 
-      /* ================= PAYLOAD ================= */
+      const existing = await LandingPage.findOne();
+
       const payload = {
         sectionOne: {
-          category: sectionOneCategory,
+          collection: sectionOneCollection,
           ctaLabel: sectionOneCta,
-          image: sectionOneImage,
+          ...(coverImage && {
+            coverImage,
+          }),
         },
+
         sectionTwo: {
           ctaLabel: sectionTwoCta,
           items,
         },
+
         sectionThree: {
           link: sectionThreeLink,
           ctaLabel: sectionThreeCta,
-          image: sectionThreeImage,
+
+          ...(campaignImage && {
+            image: campaignImage,
+          }),
         },
       };
 
-      const existing = await LandingPage.findOne();
-
       const landing = existing
         ? await LandingPage.findByIdAndUpdate(existing._id, payload, {
-          new: true,
-        })
+            new: true,
+            runValidators: true,
+          })
         : await LandingPage.create(payload);
 
-      /* 🔥 CACHE INVALIDATION */
       const redis = getRedis();
-      if (redis) await redis.del("landing:active");
 
-      res.json({
+      if (redis) {
+        await redis.del("landing:active");
+      }
+
+      return res.json({
         success: true,
-        message: "Landing page updated & images migrated successfully",
+        message: "Landing page updated successfully.",
         landing,
       });
     } catch (err) {
-      console.error("❌ Landing update error:", err);
-      res.status(500).json({ message: err.message });
+      console.error("Landing update error:", err);
+
+      return res.status(500).json({
+        success: false,
+        message: err.message,
+      });
     }
   }
 );

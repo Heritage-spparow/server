@@ -38,19 +38,35 @@ router.get('/', protect, async (req, res) => {
 
 router.post("/add", protect, async (req, res) => {
   try {
-    const { productId, size, quantity = 1 } = req.body; //
+    const { productId, size, quantity = 1 } = req.body;
 
+    // Validation
     if (!productId || !size) {
       return res.status(400).json({ success: false, message: "Product and size are required" });
     }
 
-    let cart = await Cart.findOne({ user: req.user._id });
+    if (quantity < 1) {
+      return res.status(400).json({ success: false, message: "Quantity must be at least 1" });
+    }
 
+    // Check if product exists
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    // Check if product is active
+    if (!product.active) {
+      return res.status(400).json({ success: false, message: "Product is not available" });
+    }
+
+    // Find or create cart
+    let cart = await Cart.findOne({ user: req.user._id });
     if (!cart) {
       cart = new Cart({ user: req.user._id, items: [] });
     }
 
-    // Merging logic:
+    // Check for existing item
     const existingItem = cart.items.find(item =>
       item.product.toString() === productId && item.size === size
     );
@@ -61,10 +77,11 @@ router.post("/add", protect, async (req, res) => {
       cart.items.push({ product: productId, size, quantity });
     }
 
+    // Save and populate
     await cart.save();
-    await cart.populate('items.product');
+    await cart.populate('items.product', 'name price discountPrice coverImage');
 
-    res.status(200).json({ success: true, cart });
+    res.status(200).json({ success: true, cart, message: "Item added to cart" });
   } catch (error) {
     console.error("❌ Add to cart error:", error);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });

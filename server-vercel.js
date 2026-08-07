@@ -41,6 +41,7 @@ const cartRoutes = require("./Routes/Cart");
 const orderRoutes = require("./Routes/Order");
 const adminRoutes = require("./Routes/Admin");
 const landingRoutes = require("./Routes/landing");
+const collection = require("./Routes/collections")
 
 
 /* =====================================================
@@ -111,7 +112,7 @@ app.use(
 );
 
 /* IMPORTANT: Preflight support */
-app.options("*", cors());
+app.options("*", cors()); 
 
 /* =====================================================
    SECURITY MIDDLEWARE
@@ -188,6 +189,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/landing", landingRoutes);
+app.use("/api/collections" , collection );
 
 /* =====================================================
    ROOT
