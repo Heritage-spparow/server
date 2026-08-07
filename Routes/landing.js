@@ -21,7 +21,10 @@ router.get("/", async (req, res) => {
     }
 
     const landing = await LandingPage.findOne({ active: true })
-      .populate("sectionTwo.items.productId", "name")
+      .populate(
+        "sectionTwo.items.productId",
+        "name slug category categorySlug"
+      )
       .lean();
 
     if (redis && landing) {
@@ -130,8 +133,8 @@ router.post(
 
       const landing = existing
         ? await LandingPage.findByIdAndUpdate(existing._id, payload, {
-            new: true,
-          })
+          new: true,
+        })
         : await LandingPage.create(payload);
 
       /* 🔥 CACHE INVALIDATION */
