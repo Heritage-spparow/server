@@ -120,9 +120,9 @@ router.get("/", async (req, res) => {
   try {
     const redis = getRedis();
 
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 12;
-    const skip = (page - 1) * limit;
+    const page = Number(req.query.page) || 1;
+    const limit = req.query.limit ? Number(req.query.limit) : null;
+    const skip = limit ? (page - 1) * limit : 0;
 
     const cacheKey = `products:${JSON.stringify(req.query)}`;
 
@@ -150,23 +150,23 @@ router.get("/", async (req, res) => {
       ];
     }
 
-    const products = await Product.find(filter)
-      .skip(skip)
-      .limit(limit)
-      .sort("-createdAt")
-      .lean();
+    let query = Product.find(filter).sort("-createdAt");
 
+    if (limit) {
+      query = query.skip(skip).limit(limit);
+    }
+
+    const products = await query.lean();
     const total = await Product.countDocuments(filter);
 
     const response = {
       products,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(total / limit),
+        totalPages: limit ? Math.ceil(total / limit) : 1,
         totalItems: total,
       },
     };
-
     if (redis) {
       await redis.setex(cacheKey, 300, JSON.stringify(response));
     }
