@@ -171,6 +171,7 @@ router.post('/login', [
       .cookie("token", token, cookieOptions)
       .json({
         success: true,
+        token,
         user: {
           id: user._id,
           firstName: user.firstName,
