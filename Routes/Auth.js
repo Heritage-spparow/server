@@ -47,12 +47,12 @@ router.post('/register', [
     // Generate token
     const token = user.getSignedJwtToken();
 
-     res.cookie("token", token, {
+    res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production", // REQUIRED on HTTPS
       sameSite: "none",                              // REQUIRED for cross-site
       domain: ".heritagesparrow.com",                // REQUIRED for www → api
-      maxAge: 7 * 24 * 60 * 60 * 1000,              
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
 
@@ -154,27 +154,24 @@ router.post('/login', [
     // Generate token
     const token = user.getSignedJwtToken();
 
-     res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // HTTPS only
-      sameSite: "none",                              // cross-site
-      domain: ".heritagesparrow.com",                // www → api
-      maxAge: 7 * 24 * 60 * 60 * 1000,               // 7 days
-    });
-
-    // Set token as httpOnly cookie
     const cookieOptions = {
-      expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
+      expires: new Date(
+        Date.now() +
+        Number(process.env.JWT_COOKIE_EXPIRE || 7) * 24 * 60 * 60 * 1000
+      ),
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     };
+
+    if (process.env.NODE_ENV === "production") {
+      cookieOptions.domain = ".heritagesparrow.com";
+    }
 
     res.status(200)
       .cookie('token', token, cookieOptions)
       .json({
         success: true,
-        token,
         user: {
           id: user._id,
           firstName: user.firstName,
@@ -185,8 +182,8 @@ router.post('/login', [
           role: user.role,
           isVerified: user.isVerified,
           lastLogin: user.lastLogin,
-          defaultAddress: user.defaultAddress
-        }
+          defaultAddress: user.defaultAddress,
+        },
       });
 
   } catch (error) {
@@ -522,13 +519,13 @@ router.get(
     }
 
     const token = req.user.getSignedJwtToken();
-   res.cookie("token", token, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "none",
-  domain: ".heritagesparrow.com",
-  maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-});
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "none",
+      domain: ".heritagesparrow.com",
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
 
     return res.redirect(`${process.env.CLIENT_URL}/auth/success?token=${token}`);
 
