@@ -4,12 +4,7 @@ const User = require('../Models/User');
 // Protect routes
 exports.protect = async (req, res, next) => {
   let token;
-  console.log("========== AUTH DEBUG ==========");
-  console.log("URL:", req.originalUrl);
-  console.log("Authorization:", req.headers.authorization ? "PRESENT" : "MISSING");
-  console.log("Cookie header:", req.headers.cookie || "MISSING");
-  console.log("Parsed token cookie:", req.cookies?.token ? "PRESENT" : "MISSING");
-  console.log("================================");
+ 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     // Set token from Bearer token in header
     token = req.headers.authorization.split(' ')[1];
