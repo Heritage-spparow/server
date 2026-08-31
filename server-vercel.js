@@ -190,6 +190,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/landing", landingRoutes);
 app.use("/api/collections" , collection );
+app.use("/api/coupons" , require('./Routes/Coupon'));
 
 /* =====================================================
    ROOT

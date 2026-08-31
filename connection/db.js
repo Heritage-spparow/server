@@ -30,7 +30,7 @@ async function connect(uri) {
   return mongoose.connection;
 }
 
-module.exports = {
+module.exports = { 
   connect,
   connection: mongoose.connection,
 };

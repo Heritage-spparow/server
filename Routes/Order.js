@@ -12,6 +12,12 @@ const path = require("path");
 const mongoose = require("mongoose");
 const generateInvoicePDF = require("../utils/generateInvoicePDF");
 const uploadInvoiceToCloudinary = require("../middleware/uploadInvoiceToCloudinary");
+const CheckoutSession = require("../Models/CheckoutSession");
+const {
+  calculateCart,
+  calculateCoupon,
+  roundMoney,
+} = require("../utils/pricing");
 
 // 📧 Email utils
 const ejs = require("ejs");
@@ -37,26 +43,231 @@ const fs = require("fs");
 //   fs.existsSync(path.join(__dirname, "../templates/invoiceTemplate.ejs")),
 
 // );
-
-// @route   POST /api/orders/razorpay
-// @desc    Create Razorpay Order ID only (no DB order yet)
 router.post("/razorpay", protect, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const {
+      orderItems,
+      shippingAddress,
+      couponCode,
+    } = req.body;
 
-    const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(amount * 100),
-      currency: "INR",
-      receipt: `receipt_${Date.now()}`,
+    // =====================================================
+    // 1. VALIDATE REQUEST
+    // =====================================================
+
+    if (
+      !Array.isArray(orderItems) ||
+      orderItems.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Your cart is empty",
+      });
+    }
+
+    if (!shippingAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "Shipping address is required",
+      });
+    }
+
+    // =====================================================
+    // 2. BUILD TRUSTED CART FROM DATABASE
+    // =====================================================
+
+    const cart = await buildServerCart(
+      orderItems
+    );
+
+    // =====================================================
+    // 3. VALIDATE + CALCULATE COUPON
+    // =====================================================
+
+    const {
+      coupon,
+      discountPrice,
+    } = await validateAndCalculateCoupon({
+      code: couponCode,
+      userId: req.user._id,
+      itemsPrice: cart.itemsPrice,
+      cartItems: cart.items,
     });
 
-    res.json({
+    // =====================================================
+    // 4. SHIPPING
+    // =====================================================
+
+    const country = String(
+      shippingAddress.country || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const shippingPrice =
+      country === "india"
+        ? 0
+        : 1500;
+
+    // =====================================================
+    // 5. TAX
+    // =====================================================
+
+    const taxPrice = 0;
+
+    // =====================================================
+    // 6. FINAL SERVER-SIDE TOTAL
+    // =====================================================
+
+    const totalPrice = roundMoney(
+      Math.max(
+        0,
+        cart.itemsPrice -
+          discountPrice +
+          shippingPrice +
+          taxPrice
+      )
+    );
+
+    if (
+      !Number.isFinite(totalPrice) ||
+      totalPrice <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order amount",
+      });
+    }
+
+    // =====================================================
+    // 7. CREATE RAZORPAY ORDER
+    // =====================================================
+
+    const razorpayOrder =
+      await razorpay.orders.create({
+        amount:
+          Math.round(totalPrice * 100),
+
+        currency: "INR",
+
+        receipt:
+          `receipt_${Date.now()}`,
+      });
+
+    // =====================================================
+    // 8. CREATE CHECKOUT SNAPSHOT
+    // =====================================================
+
+    const checkoutSession =
+      await CheckoutSession.create({
+        user:
+          req.user._id,
+
+        razorpayOrderId:
+          razorpayOrder.id,
+
+        orderItems:
+          cart.items,
+
+        shippingAddress,
+
+        coupon: coupon
+          ? {
+              couponId:
+                coupon._id,
+
+              code:
+                coupon.code,
+
+              discountAmount:
+                discountPrice,
+            }
+          : undefined,
+
+        itemsPrice:
+          cart.itemsPrice,
+
+        discountPrice:
+          discountPrice,
+
+        shippingPrice:
+          shippingPrice,
+
+        taxPrice:
+          taxPrice,
+
+        totalPrice:
+          totalPrice,
+
+        status:
+          "payment_pending",
+
+        expiresAt:
+          new Date(
+            Date.now() +
+              15 * 60 * 1000
+          ),
+      });
+
+    // =====================================================
+    // 9. RESPONSE
+    // =====================================================
+
+    return res.status(200).json({
       success: true,
-      key: process.env.RAZORPAY_KEY,
-      order: razorpayOrder,
+
+      key:
+        process.env.RAZORPAY_KEY,
+
+      order:
+        razorpayOrder,
+
+      checkoutSessionId:
+        checkoutSession._id,
+
+      pricing: {
+        itemsPrice:
+          cart.itemsPrice,
+
+        discountPrice:
+          discountPrice,
+
+        shippingPrice:
+          shippingPrice,
+
+        taxPrice:
+          taxPrice,
+
+        totalPrice:
+          totalPrice,
+      },
+
+      coupon: coupon
+        ? {
+            code:
+              coupon.code,
+
+            offerType:
+              coupon.offerType,
+
+            discountAmount:
+              discountPrice,
+          }
+        : null,
     });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Payment init failed" });
+
+  } catch (error) {
+    console.error(
+      "❌ Razorpay order creation failed:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Payment initialization failed",
+    });
   }
 });
 
@@ -219,44 +430,699 @@ router.post("/capture", protect, async (req, res) => {
 // @route   POST /api/orders/razorpay/verify
 // @desc    Verify Razorpay Payment Signature
 // @access  Private
+// @route   POST /api/orders/razorpay/verify
+// @desc    Verify Razorpay payment and create order
+// @access  Private
 router.post("/razorpay/verify", protect, async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const {
       razorpay_order_id,
       razorpay_payment_id,
-      razorpay_signature
+      razorpay_signature,
     } = req.body;
 
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_SECRET)
-      .update(razorpay_order_id + "|" + razorpay_payment_id)
-      .digest("hex");
+    // =====================================================
+    // 1. BASIC VALIDATION
+    // =====================================================
 
-    if (generatedSignature !== razorpay_signature) {
+    if (
+      !razorpay_order_id ||
+      !razorpay_payment_id ||
+      !razorpay_signature
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid payment signature"
+        message: "Missing Razorpay payment details",
       });
     }
 
-    return res.status(200).json({
+    // =====================================================
+    // 2. VERIFY RAZORPAY SIGNATURE
+    // =====================================================
+
+    const generatedSignature = crypto
+      .createHmac(
+        "sha256",
+        process.env.RAZORPAY_SECRET
+      )
+      .update(
+        `${razorpay_order_id}|${razorpay_payment_id}`
+      )
+      .digest("hex");
+
+    if (
+      generatedSignature !==
+      razorpay_signature
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment signature",
+      });
+    }
+
+    // =====================================================
+    // 3. FETCH RAZORPAY ORDER + PAYMENT
+    // =====================================================
+
+    const razorpayOrder =
+      await razorpay.orders.fetch(
+        razorpay_order_id
+      );
+
+    const razorpayPayment =
+      await razorpay.payments.fetch(
+        razorpay_payment_id
+      );
+
+    // Payment must belong to this Razorpay order
+    if (
+      razorpayPayment.order_id !==
+      razorpay_order_id
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Payment does not belong to this order",
+      });
+    }
+
+    // Payment must actually be captured
+    if (
+      razorpayPayment.status !==
+      "captured"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Payment has not been captured",
+      });
+    }
+
+    // =====================================================
+    // 4. DUPLICATE PAYMENT PROTECTION
+    // =====================================================
+
+    const existingOrder =
+      await Order.findOne({
+        "paymentResult.id":
+          razorpay_payment_id,
+      });
+
+    if (existingOrder) {
+      return res.status(200).json({
+        success: true,
+        order: existingOrder,
+        payment: {
+          id: razorpay_payment_id,
+          status: "paid",
+        },
+      });
+    }
+
+    // =====================================================
+    // 5. GET CHECKOUT SNAPSHOT
+    // =====================================================
+
+    const checkoutSession =
+      await CheckoutSession.findOne({
+        user: req.user._id,
+
+        razorpayOrderId:
+          razorpay_order_id,
+
+        status:
+          "payment_pending",
+      });
+
+    if (!checkoutSession) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Checkout session not found or already completed",
+      });
+    }
+
+    // =====================================================
+    // 6. CHECK CHECKOUT SESSION EXPIRY
+    // =====================================================
+
+    if (
+      checkoutSession.expiresAt &&
+      new Date(
+        checkoutSession.expiresAt
+      ) <= new Date()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Checkout session has expired",
+      });
+    }
+
+    // =====================================================
+    // 7. VERIFY RAZORPAY AMOUNT AGAINST
+    //    SERVER-SIDE CHECKOUT SNAPSHOT
+    // =====================================================
+
+    const expectedAmount =
+      Math.round(
+        Number(
+          checkoutSession.totalPrice
+        ) * 100
+      );
+
+    if (
+      Number(razorpayOrder.amount) !==
+      expectedAmount
+    ) {
+      console.error(
+        "❌ Razorpay amount mismatch",
+        {
+          razorpayOrderId:
+            razorpay_order_id,
+
+          razorpayAmount:
+            razorpayOrder.amount,
+
+          expectedAmount,
+        }
+      );
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Payment amount does not match checkout",
+      });
+    }
+
+    // Currency must match
+    if (
+      razorpayOrder.currency !==
+      "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid payment currency",
+      });
+    }
+
+    // =====================================================
+    // 8. START TRANSACTION
+    // =====================================================
+
+    session.startTransaction();
+
+    // =====================================================
+    // 9. RELOAD CHECKOUT SESSION INSIDE
+    //    TRANSACTION
+    // =====================================================
+
+    const lockedCheckoutSession =
+      await CheckoutSession.findOne({
+        _id:
+          checkoutSession._id,
+
+        user:
+          req.user._id,
+
+        razorpayOrderId:
+          razorpay_order_id,
+
+        status:
+          "payment_pending",
+      }).session(session);
+
+    if (!lockedCheckoutSession) {
+      throw new Error(
+        "Checkout session is no longer available"
+      );
+    }
+
+    // =====================================================
+    // 10. CREATE ORDER FROM CHECKOUT SNAPSHOT
+    // =====================================================
+
+    const [order] =
+      await Order.create(
+        [
+          {
+            user:
+              req.user._id,
+
+            orderItems:
+              lockedCheckoutSession.orderItems,
+
+            shippingAddress:
+              lockedCheckoutSession.shippingAddress,
+
+            paymentMethod:
+              "razorpay",
+
+            paymentResult: {
+              id:
+                razorpay_payment_id,
+
+              status:
+                "paid",
+
+              updateTime:
+                Date.now(),
+
+              emailAddress:
+                req.user.email,
+            },
+
+            itemsPrice:
+              lockedCheckoutSession.itemsPrice,
+
+            discountPrice:
+              lockedCheckoutSession.discountPrice,
+
+            couponCode:
+              lockedCheckoutSession
+                .coupon?.code || null,
+
+            taxPrice:
+              lockedCheckoutSession.taxPrice,
+
+            shippingPrice:
+              lockedCheckoutSession.shippingPrice,
+
+            totalPrice:
+              lockedCheckoutSession.totalPrice,
+
+            isPaid:
+              true,
+
+            paidAt:
+              Date.now(),
+
+            status:
+              "confirmed",
+          },
+        ],
+        { session }
+      );
+
+    // =====================================================
+    // 11. ATOMIC STOCK REDUCTION
+    // =====================================================
+
+    for (
+      const item of
+        lockedCheckoutSession.orderItems
+    ) {
+      const result =
+        await Product.updateOne(
+          {
+            _id:
+              item.product,
+
+            sizes: {
+              $elemMatch: {
+                size:
+                  item.size,
+
+                stock: {
+                  $gte:
+                    item.quantity,
+                },
+              },
+            },
+          },
+
+          {
+            $inc: {
+              "sizes.$[size].stock":
+                -item.quantity,
+            },
+          },
+
+          {
+            arrayFilters: [
+              {
+                "size.size":
+                  item.size,
+
+                "size.stock": {
+                  $gte:
+                    item.quantity,
+                },
+              },
+            ],
+
+            session,
+          }
+        );
+
+      if (
+        result.modifiedCount !== 1
+      ) {
+        throw new Error(
+          `Insufficient stock for ${item.name} (size ${item.size})`
+        );
+      }
+    }
+
+    // =====================================================
+    // 12. COUPON REDEMPTION
+    // =====================================================
+
+    const couponId =
+      lockedCheckoutSession
+        .coupon?.couponId;
+
+    const savedCouponCode =
+      lockedCheckoutSession
+        .coupon?.code;
+
+    const discountPrice =
+      Number(
+        lockedCheckoutSession
+          .discountPrice || 0
+      );
+
+    if (couponId) {
+      const CouponRedemption =
+        require(
+          "../Models/CouponRedemption"
+        );
+
+      // -----------------------------------------------
+      // Check per-user usage again inside transaction
+      // -----------------------------------------------
+
+      const previousUses =
+        await CouponRedemption.countDocuments({
+          coupon:
+            couponId,
+
+          user:
+            req.user._id,
+        }).session(session);
+
+      // Get current coupon
+      const coupon =
+        await Coupon.findOne({
+          _id:
+            couponId,
+
+          active:
+            true,
+        }).session(session);
+
+      if (!coupon) {
+        throw new Error(
+          "Coupon is no longer available"
+        );
+      }
+
+      if (
+        previousUses >=
+        Number(
+          coupon.perUserLimit || 1
+        )
+      ) {
+        throw new Error(
+          "You have already used this coupon"
+        );
+      }
+
+      // -----------------------------------------------
+      // Atomically increment global usage
+      // -----------------------------------------------
+
+      const couponUpdate =
+        await Coupon.updateOne(
+          {
+            _id:
+              couponId,
+
+            active:
+              true,
+
+            $or: [
+              {
+                usageLimit:
+                  null,
+              },
+
+              {
+                $expr: {
+                  $lt: [
+                    "$usedCount",
+                    "$usageLimit",
+                  ],
+                },
+              },
+            ],
+          },
+
+          {
+            $inc: {
+              usedCount:
+                1,
+            },
+          },
+
+          {
+            session,
+          }
+        );
+
+      if (
+        couponUpdate.modifiedCount !==
+        1
+      ) {
+        throw new Error(
+          "Coupon usage limit was reached"
+        );
+      }
+
+      // -----------------------------------------------
+      // Create redemption
+      // -----------------------------------------------
+
+      await CouponRedemption.create(
+        [
+          {
+            coupon:
+              couponId,
+
+            user:
+              req.user._id,
+
+            order:
+              order._id,
+
+            code:
+              savedCouponCode,
+
+            discountAmount:
+              discountPrice,
+          },
+        ],
+        {
+          session,
+        }
+      );
+    }
+
+    // =====================================================
+    // 13. CLEAR CART
+    // =====================================================
+
+    await Cart.findOneAndUpdate(
+      {
+        user:
+          req.user._id,
+      },
+
+      {
+        $set: {
+          items: [],
+          totalItems: 0,
+          totalPrice: 0,
+        },
+      },
+
+      {
+        session,
+      }
+    );
+
+    // =====================================================
+    // 14. MARK CHECKOUT SESSION COMPLETED
+    // =====================================================
+
+    lockedCheckoutSession.status =
+      "completed";
+
+    lockedCheckoutSession.paymentId =
+      razorpay_payment_id;
+
+    await lockedCheckoutSession.save({
+      session,
+    });
+
+    // =====================================================
+    // 15. COMMIT EVERYTHING
+    // =====================================================
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // =====================================================
+    // 16. RESPOND
+    // =====================================================
+
+    res.status(200).json({
       success: true,
+
+      order,
+
       payment: {
-        id: razorpay_payment_id,
-        status: "paid"
+        id:
+          razorpay_payment_id,
+
+        status:
+          "paid",
+      },
+
+      pricing: {
+        itemsPrice:
+          order.itemsPrice,
+
+        discountPrice:
+          order.discountPrice,
+
+        shippingPrice:
+          order.shippingPrice,
+
+        taxPrice:
+          order.taxPrice,
+
+        totalPrice:
+          order.totalPrice,
+      },
+    });
+
+    // =====================================================
+    // 17. INVOICE + EMAIL
+    // =====================================================
+
+    setImmediate(async () => {
+      try {
+        const pdfBuffer =
+          await generateInvoicePDF(
+            order,
+            req.user
+          );
+
+        const invoiceData =
+          await uploadInvoiceToCloudinary(
+            pdfBuffer,
+            order.orderNumber
+          );
+
+        order.invoice = {
+          url:
+            invoiceData.url,
+
+          publicId:
+            invoiceData.publicId,
+
+          generatedAt:
+            new Date(),
+        };
+
+        await order.save();
+
+        const transporter =
+          getMailer();
+
+        const templatePath =
+          path.join(
+            __dirname,
+            "../templates/invoiceTemplate.ejs"
+          );
+
+        const htmlRaw =
+          await ejs.renderFile(
+            templatePath,
+            {
+              order,
+              user:
+                req.user,
+              moment,
+            }
+          );
+
+        const html =
+          juice(htmlRaw);
+
+        await transporter.sendMail({
+          from:
+            process.env.EMAIL_FROM,
+
+          to:
+            req.user.email,
+
+          subject:
+            `Order Confirmed – #${order.orderNumber}`,
+
+          html,
+
+          attachments: [
+            {
+              filename:
+                `Invoice-${order.orderNumber}.pdf`,
+
+              path:
+                invoiceData.url,
+            },
+          ],
+        });
+
+        console.log(
+          "✅ Razorpay invoice/email completed"
+        );
+
+      } catch (err) {
+        console.error(
+          "❌ Post-order task failed:",
+          err
+        );
       }
     });
 
   } catch (error) {
-    res.status(500).json({
+    // Only abort if transaction is still active
+    if (
+      session.inTransaction()
+    ) {
+      await session.abortTransaction();
+    }
+
+    session.endSession();
+
+    console.error(
+      "❌ Razorpay verification failed:",
+      error
+    );
+
+    return res.status(500).json({
       success: false,
-      message: "Signature verification failed",
-      error: error.message,
+      message:
+        error.message ||
+        "Payment verification failed",
     });
   }
 });
-
-
+ 
 
 // @route   POST /api/orders
 // @desc    Create COD order + send confirmation email (Vercel safe)

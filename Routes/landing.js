@@ -63,7 +63,7 @@ router.post(
       name: "sectionOneCoverImage",
       maxCount: 1,
     },
-    {
+    { 
       name: "sectionThreeImage",
       maxCount: 1,
     },

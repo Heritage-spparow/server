@@ -319,7 +319,7 @@ if (useCluster && cluster.isMaster) {
   };
 
 
-  // New async function to handle initialization and server start
+  
   const startServer = async () => {
     try {
 
@@ -332,6 +332,7 @@ if (useCluster && cluster.isMaster) {
       app.use('/api/products-enhanced', productRoutes);
       app.use("/api/landing", require("./Routes/landing"));
       app.use("/api/collections" , require("./Routes/collections") );
+      app.use("/api/coupons" , require('./Routes/Coupon'));
 
       // Admin routes
       app.use('/api/admin', adminRoutes);
