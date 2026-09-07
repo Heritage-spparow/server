@@ -164,6 +164,19 @@ module.exports = async function generateInvoicePDF(order, user) {
         rowY += 36;
       });
 
+      /* ================= TOTALS ================= */
+      rowY += 18;
+      doc.font("Helvetica-Bold").text("Subtotal:", 390, rowY, { width: 80, align: "right" });
+      doc.font("Helvetica").text(`₹${Number(order.itemsPrice).toFixed(2)}`, 480, rowY, { width: 75, align: "right" });
+      rowY += 14;
+      doc.font("Helvetica-Bold").text("Discount:", 390, rowY, { width: 80, align: "right" });
+      doc.font("Helvetica").text(`-₹${Number(order.discountPrice || 0).toFixed(2)}`, 480, rowY, { width: 75, align: "right" });
+      rowY += 14;
+      doc.font("Helvetica-Bold").text("Shipping:", 390, rowY, { width: 80, align: "right" });
+      doc.font("Helvetica").text(`₹${Number(order.shippingPrice || 0).toFixed(2)}`, 480, rowY, { width: 75, align: "right" });
+      rowY += 16;
+      doc.font("Helvetica-Bold").text("Total:", 390, rowY, { width: 80, align: "right" });
+      doc.text(`₹${Number(order.totalPrice).toFixed(2)}`, 480, rowY, { width: 75, align: "right" });
 
       /* ================= AMOUNT IN WORDS ================= */
       rowY += 24;

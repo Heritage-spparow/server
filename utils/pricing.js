@@ -59,7 +59,7 @@ async function buildServerCart(orderItems, session = null) {
 
     const query = Product.findById(productId)
       .select(
-        "name price active coverImage sizes"
+        "name price active coverImage sizes collection"
       );
 
     if (session) {
@@ -112,6 +112,7 @@ async function buildServerCart(orderItems, session = null) {
       product: product._id,
       name: product.name,
       image: product.coverImage?.url,
+      collection: product.collection,
       price,
       quantity,
       size,
@@ -218,6 +219,27 @@ function calculateBuyXGetYDiscount(
 ) {
   const buyQuantity =
     Number(coupon.buyQuantity);
+
+  if (coupon.offerType === "buy_x_get_y_discount") {
+    const totalQuantity = eligibleItems.reduce(
+      (sum, item) => sum + Number(item.quantity || 0),
+      0
+    );
+
+    if (totalQuantity < buyQuantity) return 0;
+
+    const eligibleSubtotal = eligibleItems.reduce(
+      (sum, item) =>
+        sum + Number(item.price) * Number(item.quantity),
+      0
+    );
+
+    return (
+      eligibleSubtotal *
+      Number(coupon.getDiscountPercentage || 0) /
+      100
+    );
+  }
 
   const getQuantity =
     Number(coupon.getQuantity);
@@ -373,6 +395,7 @@ async function validateAndCalculateCoupon({
   const couponQuery =
     Coupon.findOne({
       code: normalized,
+      promotionType: "coupon",
       active: true,
     });
 
@@ -618,6 +641,70 @@ const calculateCoupon = async ({
     session,
   });
 };
+// =====================================================
+// AUTOMATIC COLLECTION DISCOUNTS
+// =====================================================
+
+/**
+ * General promotions are configured by an administrator and are applied
+ * automatically to eligible cart items.
+ */
+async function calculateAutomaticDiscount(cartItems) {
+  const now = new Date();
+  const promotions = await Coupon.find({
+    promotionType: "general",
+    active: true,
+    $and: [
+      { $or: [{ startsAt: null }, { startsAt: { $lte: now } }] },
+      { $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }] },
+    ],
+  }).lean();
+
+  let discount = 0;
+
+  for (const promotion of promotions) {
+    const eligibleItems = cartItems.filter((item) => {
+      if (promotion.appliesToAllProducts) return true;
+
+      return promotion.applicableProducts?.some(
+        (id) => String(id) === String(item.product)
+      );
+    });
+
+    if (!eligibleItems.length) continue;
+
+    const eligibleSubtotal = roundMoney(
+      eligibleItems.reduce(
+        (sum, item) => sum + Number(item.price) * Number(item.quantity),
+        0
+      )
+    );
+
+    if (eligibleSubtotal < Number(promotion.minOrderValue || 0)) continue;
+
+    let promotionDiscount = 0;
+
+    if (promotion.offerType === "percentage" || promotion.offerType === "fixed") {
+      promotionDiscount = calculateNormalDiscount(promotion, eligibleSubtotal);
+    } else if (
+      promotion.offerType === "buy_x_get_y_free" ||
+      promotion.offerType === "buy_x_get_y_discount"
+    ) {
+      promotionDiscount = calculateBuyXGetYDiscount(promotion, eligibleItems);
+    }
+
+    if (promotion.maxDiscount != null) {
+      promotionDiscount = Math.min(
+        promotionDiscount,
+        Number(promotion.maxDiscount)
+      );
+    }
+
+    discount += Math.min(promotionDiscount, eligibleSubtotal);
+  }
+
+  return roundMoney(Math.max(0, discount));
+}
 
 module.exports = {
   roundMoney,
@@ -626,7 +713,8 @@ module.exports = {
   buildServerCart,
   validateAndCalculateCoupon,
 
-  // Compatibility with Order routes
+  calculateAutomaticDiscount,
+
   calculateCart,
   calculateCoupon,
 };

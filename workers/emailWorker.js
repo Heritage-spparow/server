@@ -8,6 +8,8 @@ const { emailQueue } = require('../queues/emailQueue');
 const Order = require('../Models/Order');
 const User = require('../Models/User');
 const Product = require('../Models/Product'); // Ensure Product model is loaded
+const generateInvoicePDF = require('../utils/generateInvoicePDF');
+const uploadInvoiceToCloudinary = require('../middleware/uploadInvoiceToCloudinary');
 const { error } = require('console');
 
 // Connect to MongoDB for the worker
@@ -79,6 +81,22 @@ emailQueue.process('order_invoice', async (job) => {
   const user = await User.findById(order.user);
   if (!user) throw new Error(`User not found for order: ${orderId}`);
 
+  if (!order.invoice?.url) {
+    const pdfBuffer = await generateInvoicePDF(order, user);
+    const invoiceData = await uploadInvoiceToCloudinary(
+      pdfBuffer,
+      order.orderNumber
+    );
+
+    order.invoice = {
+      url: invoiceData.url,
+      publicId: invoiceData.publicId,
+      generatedAt: new Date(),
+    };
+
+    await order.save();
+  }
+
   const html = await renderInvoice(order, user);
   const textItems = order.orderItems.map(item => `${item.product?.name || item.name} - ${item.quantity} x ${Number(item.price).toFixed(2)}`).join('\n');
 
@@ -88,6 +106,12 @@ emailQueue.process('order_invoice', async (job) => {
     subject: `Invoice for Order #${order.orderNumber} - Heritage Sparrow`,
     html,
     text: `Hello ${user.fullName || user.firstName},\n\nThank you for your purchase!\n\nOrder #${order.orderNumber}\nItems:\n${textItems}\n\nTotal: ₹${order.totalPrice.toFixed(2)}`,
+    attachments: order.invoice?.url
+      ? [{
+          filename: `Invoice-${order.orderNumber}.pdf`,
+          path: order.invoice.url,
+        }]
+      : [],
   };
 
   await transporter.sendMail(message);

@@ -2,18 +2,27 @@ const mongoose = require("mongoose");
 
 const couponSchema = new mongoose.Schema(
   {
-    // Admin-visible name
+    promotionType: {
+      type: String,
+      enum: ["coupon", "general"],
+      default: "coupon",
+      required: true,
+      index: true,
+    },
+
+    // Admin-visible name. General promotions do not require one.
     name: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
 
-    // Customer-entered coupon
+    // Customer-entered coupon. General promotions have no code.
     code: {
       type: String,
-      required: true,
+      required: false,
       unique: true,
+      sparse: true,
       uppercase: true,
       trim: true,
       index: true,
@@ -75,6 +84,12 @@ const couponSchema = new mongoose.Schema(
       default: false,
     },
 
+    collectionName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
     minOrderValue: {
       type: Number,
       default: 0,
@@ -129,6 +144,18 @@ const couponSchema = new mongoose.Schema(
 
 // Validate offer configuration
 couponSchema.pre("validate", function (next) {
+  if (this.promotionType === "coupon" && !this.name?.trim()) {
+    return next(new Error("Promotion name is required for a coupon"));
+  }
+
+  if (this.promotionType === "coupon" && !this.code?.trim()) {
+    return next(new Error("Coupon code is required"));
+  }
+
+  if (this.promotionType === "general") {
+    this.name = undefined;
+  }
+
   if (
     this.offerType === "percentage" &&
     (this.discountValue <= 0 ||
@@ -166,8 +193,8 @@ couponSchema.pre("validate", function (next) {
     }
 
     if (
-      !Number.isInteger(this.getQuantity) ||
-      this.getQuantity < 1
+      this.offerType === "buy_x_get_y_free" &&
+      (!Number.isInteger(this.getQuantity) || this.getQuantity < 1)
     ) {
       return next(
         new Error("Get quantity must be at least 1")

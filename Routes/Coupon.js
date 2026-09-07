@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 
 const Coupon = require("../Models/Coupon");
 const Product = require("../Models/Product");
@@ -37,6 +38,31 @@ router.get(
       res.status(500).json({
         success: false,
         message: "Failed to load products",
+      });
+    }
+  }
+);
+
+router.get(
+  "/collections",
+  protect,
+  authorize("admin"),
+  async (req, res) => {
+    try {
+      const collections = await Product.distinct("collection", {
+        active: true,
+        collection: { $nin: [null, ""] },
+      });
+
+      res.json({
+        success: true,
+        collections: collections.filter(Boolean).sort(),
+      });
+    } catch (error) {
+      console.error("Coupon collections error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to load collections",
       });
     }
   }
@@ -219,6 +245,28 @@ router.post(
   }
 );
 
+router.post(
+  "/automatic",
+  protect,
+  async (req, res) => {
+    try {
+      const { calculateCart, calculateAutomaticDiscount } = require("../utils/pricing");
+      const cart = await calculateCart(req.body.orderItems);
+      const discountPrice = await calculateAutomaticDiscount(cart.items);
+
+      res.json({
+        success: true,
+        discountPrice,
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        message: error.message || "Unable to calculate automatic promotion",
+      });
+    }
+  }
+);
+
 // =====================================================
 // CREATE PROMOTION
 // POST /api/coupons
@@ -231,6 +279,7 @@ router.post(
   async (req, res) => {
     try {
       const {
+        promotionType = "coupon",
         name,
         code,
         offerType,
@@ -243,6 +292,7 @@ router.post(
 
         applicableProducts,
         appliesToAllProducts,
+        collectionName,
 
         minOrderValue,
         maxDiscount,
@@ -261,32 +311,37 @@ router.post(
       // BASIC VALIDATION
       // -----------------------------
 
-      if (!name?.trim()) {
+      if (!['coupon', 'general'].includes(promotionType)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid promotion type",
+        });
+      }
+
+      if (promotionType === "coupon" && !name?.trim()) {
         return res.status(400).json({
           success: false,
           message: "Promotion name is required",
         });
       }
 
-      if (!code?.trim()) {
+      if (promotionType === "coupon" && !code?.trim()) {
         return res.status(400).json({
           success: false,
           message: "Coupon code is required",
         });
       }
 
-      const normalizedCode =
-        code.trim().toUpperCase();
+      const normalizedCode = code?.trim().toUpperCase();
 
 
       // -----------------------------
       // CHECK DUPLICATE CODE
       // -----------------------------
 
-      const existingCoupon =
-        await Coupon.findOne({
-          code: normalizedCode,
-        });
+      const existingCoupon = normalizedCode
+        ? await Coupon.findOne({ code: normalizedCode })
+        : null;
 
       if (existingCoupon) {
         return res.status(400).json({
@@ -301,13 +356,33 @@ router.post(
       // PRODUCT VALIDATION
       // -----------------------------
 
-      const allProducts =
-        Boolean(appliesToAllProducts);
+      const allProducts = Boolean(appliesToAllProducts) && !collectionName?.trim();
 
       let selectedProducts =
         Array.isArray(applicableProducts)
           ? applicableProducts
           : [];
+
+      let normalizedCollectionName = null;
+
+      if (collectionName?.trim()) {
+        const collectionProducts = await Product.find({
+          active: true,
+          collection: {
+            $regex: new RegExp(`^${collectionName.trim()}$`, "i"),
+          },
+        }).select("_id collection").lean();
+
+        if (collectionProducts.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: "The selected collection has no active products",
+          });
+        }
+
+        normalizedCollectionName = collectionProducts[0].collection;
+        selectedProducts = collectionProducts.map((product) => product._id);
+      }
 
       if (!allProducts &&
           selectedProducts.length === 0) {
@@ -424,10 +499,9 @@ router.post(
         }
 
         if (
-          !Number.isInteger(
-            Number(getQuantity)
-          ) ||
-          Number(getQuantity) < 1
+          offerType === "buy_x_get_y_free" &&
+          (!Number.isInteger(Number(getQuantity)) ||
+            Number(getQuantity) < 1)
         ) {
           return res.status(400).json({
             success: false,
@@ -468,9 +542,14 @@ router.post(
 
       const coupon =
         await Coupon.create({
-          name: name.trim(),
+          promotionType,
 
-          code: normalizedCode,
+          name: promotionType === "coupon" ? name.trim() : undefined,
+
+          code:
+            promotionType === "coupon"
+              ? normalizedCode
+              : `GENERAL_${new mongoose.Types.ObjectId()}`,
 
           offerType,
 
@@ -486,10 +565,7 @@ router.post(
               : null,
 
           getQuantity:
-            offerType ===
-                "buy_x_get_y_free" ||
-            offerType ===
-                "buy_x_get_y_discount"
+            offerType === "buy_x_get_y_free"
               ? Number(getQuantity)
               : null,
 
@@ -508,6 +584,8 @@ router.post(
 
           appliesToAllProducts:
             allProducts,
+
+          collectionName: normalizedCollectionName,
 
           minOrderValue:
             Number(minOrderValue || 0),

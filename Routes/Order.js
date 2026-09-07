@@ -14,8 +14,10 @@ const generateInvoicePDF = require("../utils/generateInvoicePDF");
 const uploadInvoiceToCloudinary = require("../middleware/uploadInvoiceToCloudinary");
 const CheckoutSession = require("../Models/CheckoutSession");
 const {
+  buildServerCart,
   calculateCart,
   calculateCoupon,
+  calculateAutomaticDiscount,
   roundMoney,
 } = require("../utils/pricing");
 
@@ -24,6 +26,18 @@ const ejs = require("ejs");
 const juice = require("juice");
 const moment = require("moment");
 const getMailer = require("../utils/mailer");
+
+async function queueInvoiceEmail(orderId) {
+  try {
+    await emailQueue.add(
+      "order_invoice",
+      { orderId: orderId.toString() },
+      { jobId: `order-invoice-${orderId}` }
+    );
+  } catch (error) {
+    console.error("❌ Invoice email job enqueue failed:", error);
+  }
+}
 
 
 // ⭐ RAZORPAY IMPORTS
@@ -79,20 +93,48 @@ router.post("/razorpay", protect, async (req, res) => {
     const cart = await buildServerCart(
       orderItems
     );
+    // =====================================================
+    // 3. AUTOMATIC COLLECTION DISCOUNT
+    // =====================================================
+
+    const automaticDiscount =
+      await calculateAutomaticDiscount(
+        cart.items
+      );
 
     // =====================================================
-    // 3. VALIDATE + CALCULATE COUPON
+    // 4. NORMAL COUPON
     // =====================================================
 
     const {
       coupon,
-      discountPrice,
-    } = await validateAndCalculateCoupon({
-      code: couponCode,
-      userId: req.user._id,
-      itemsPrice: cart.itemsPrice,
-      cartItems: cart.items,
-    });
+      discountPrice: couponDiscount,
+    } =
+      await calculateCoupon({
+        code: couponCode,
+        userId: req.user._id,
+        itemsPrice: cart.itemsPrice,
+        cartItems: cart.items,
+      });
+
+    // =====================================================
+    // 5. TOTAL DISCOUNT
+    // =====================================================
+    //
+    // Automatic collection discounts and coupon discounts
+    // are both applied.
+    //
+    // Example:
+    // Collection A → ₹400
+    // Goldasta → ₹500
+    // Coupon → ₹200
+    //
+    // Total → ₹1100
+    // =====================================================
+
+    const discountPrice = roundMoney(
+      automaticDiscount + couponDiscount
+    );
 
     // =====================================================
     // 4. SHIPPING
@@ -123,9 +165,9 @@ router.post("/razorpay", protect, async (req, res) => {
       Math.max(
         0,
         cart.itemsPrice -
-          discountPrice +
-          shippingPrice +
-          taxPrice
+        discountPrice +
+        shippingPrice +
+        taxPrice
       )
     );
 
@@ -173,15 +215,15 @@ router.post("/razorpay", protect, async (req, res) => {
 
         coupon: coupon
           ? {
-              couponId:
-                coupon._id,
+            couponId:
+              coupon._id,
 
-              code:
-                coupon.code,
+            code:
+              coupon.code,
 
-              discountAmount:
-                discountPrice,
-            }
+            discountAmount:
+              discountPrice,
+          }
           : undefined,
 
         itemsPrice:
@@ -205,7 +247,7 @@ router.post("/razorpay", protect, async (req, res) => {
         expiresAt:
           new Date(
             Date.now() +
-              15 * 60 * 1000
+            15 * 60 * 1000
           ),
       });
 
@@ -244,16 +286,20 @@ router.post("/razorpay", protect, async (req, res) => {
 
       coupon: coupon
         ? {
-            code:
-              coupon.code,
-
-            offerType:
-              coupon.offerType,
-
-            discountAmount:
-              discountPrice,
-          }
+          code: coupon.code,
+          offerType: coupon.offerType,
+          discountAmount: couponDiscount,
+        }
         : null,
+
+      automaticDiscount:
+        automaticDiscount > 0
+          ? {
+            amount: automaticDiscount,
+            message:
+              "Automatic collection discount applied",
+          }
+          : null,
     });
 
   } catch (error) {
@@ -275,6 +321,11 @@ router.post("/razorpay", protect, async (req, res) => {
 // @desc    Capture Razorpay payment + create order + send email
 // @access  Private
 router.post("/capture", protect, async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: "This payment endpoint is retired. Use /orders/razorpay/verify.",
+  });
+
   try {
     const {
       paymentId,
@@ -362,63 +413,7 @@ router.post("/capture", protect, async (req, res) => {
     /* 🚀 RESPOND IMMEDIATELY (CRITICAL) */
     res.json({ success: true, order });
 
-    /* =================================================
-       ⏳ POST-RESPONSE ASYNC TASKS (NON-BLOCKING)
-       ================================================= */
-
-    setImmediate(async () => {
-      try {
-        /* 🧾 INVOICE */
-        const pdfBuffer = await generateInvoicePDF(order, req.user);
-
-        const invoiceData = await uploadInvoiceToCloudinary(
-          pdfBuffer,
-          order.orderNumber
-        );
-
-        order.invoice = {
-          url: invoiceData.url,
-          publicId: invoiceData.publicId,
-          generatedAt: new Date(),
-        };
-
-        await order.save();
-
-        console.log("✅ Razorpay invoice generated");
-
-        /* 📧 EMAIL */
-        const transporter = getMailer();
-        const templatePath = path.join(
-          __dirname,
-          "../templates/invoiceTemplate.ejs"
-        );
-
-        const htmlRaw = await ejs.renderFile(templatePath, {
-          order,
-          user: req.user,
-          moment,
-        });
-
-        const html = juice(htmlRaw);
-
-        await transporter.sendMail({
-          from: process.env.EMAIL_FROM,
-          to: req.user.email,
-          subject: `Order Confirmed – #${order.orderNumber}`,
-          html,
-          attachments: [
-            {
-              filename: `Invoice-${order.orderNumber}.pdf`,
-              path: invoiceData.url,
-            },
-          ],
-        });
-
-        console.log("✅ Razorpay email sent");
-      } catch (err) {
-        console.error("❌ Razorpay post-order task failed:", err);
-      }
-    });
+    await queueInvoiceEmail(order._id);
 
   } catch (err) {
     console.error("❌ Capture failed:", err);
@@ -733,7 +728,7 @@ router.post("/razorpay/verify", protect, async (req, res) => {
 
     for (
       const item of
-        lockedCheckoutSession.orderItems
+      lockedCheckoutSession.orderItems
     ) {
       const result =
         await Product.updateOne(
@@ -1010,94 +1005,7 @@ router.post("/razorpay/verify", protect, async (req, res) => {
       },
     });
 
-    // =====================================================
-    // 17. INVOICE + EMAIL
-    // =====================================================
-
-    setImmediate(async () => {
-      try {
-        const pdfBuffer =
-          await generateInvoicePDF(
-            order,
-            req.user
-          );
-
-        const invoiceData =
-          await uploadInvoiceToCloudinary(
-            pdfBuffer,
-            order.orderNumber
-          );
-
-        order.invoice = {
-          url:
-            invoiceData.url,
-
-          publicId:
-            invoiceData.publicId,
-
-          generatedAt:
-            new Date(),
-        };
-
-        await order.save();
-
-        const transporter =
-          getMailer();
-
-        const templatePath =
-          path.join(
-            __dirname,
-            "../templates/invoiceTemplate.ejs"
-          );
-
-        const htmlRaw =
-          await ejs.renderFile(
-            templatePath,
-            {
-              order,
-              user:
-                req.user,
-              moment,
-            }
-          );
-
-        const html =
-          juice(htmlRaw);
-
-        await transporter.sendMail({
-          from:
-            process.env.EMAIL_FROM,
-
-          to:
-            req.user.email,
-
-          subject:
-            `Order Confirmed – #${order.orderNumber}`,
-
-          html,
-
-          attachments: [
-            {
-              filename:
-                `Invoice-${order.orderNumber}.pdf`,
-
-              path:
-                invoiceData.url,
-            },
-          ],
-        });
-
-        console.log(
-          "✅ Razorpay invoice/email completed"
-        );
-
-      } catch (err) {
-        console.error(
-          "❌ Post-order task failed:",
-          err
-        );
-      }
-    });
+    await queueInvoiceEmail(order._id);
 
   } catch (error) {
     // Only abort if transaction is still active
@@ -1122,7 +1030,7 @@ router.post("/razorpay/verify", protect, async (req, res) => {
     });
   }
 });
- 
+
 
 // @route   POST /api/orders
 // @desc    Create COD order + send confirmation email (Vercel safe)
@@ -1201,63 +1109,7 @@ router.post("/", protect, async (req, res) => {
     /* 🚀 RESPOND IMMEDIATELY (CRITICAL) */
     res.status(201).json({ success: true, order });
 
-    /* =================================================
-       ⏳ POST-RESPONSE ASYNC TASKS (NON-BLOCKING)
-       ================================================= */
-
-    setImmediate(async () => {
-      try {
-        /* 🧾 INVOICE */
-        const pdfBuffer = await generateInvoicePDF(order, req.user);
-
-        const invoiceData = await uploadInvoiceToCloudinary(
-          pdfBuffer,
-          order.orderNumber
-        );
-
-        order.invoice = {
-          url: invoiceData.url,
-          publicId: invoiceData.publicId,
-          generatedAt: new Date(),
-        };
-
-        await order.save();
-
-        console.log("✅ COD invoice generated");
-
-        /* 📧 EMAIL */
-        const transporter = getMailer();
-        const templatePath = path.join(
-          __dirname,
-          "../templates/invoiceTemplate.ejs"
-        );
-
-        const htmlRaw = await ejs.renderFile(templatePath, {
-          order,
-          user: req.user,
-          moment,
-        });
-
-        const html = juice(htmlRaw);
-
-        await transporter.sendMail({
-          from: process.env.EMAIL_FROM,
-          to: req.user.email,
-          subject: `Order Confirmed (COD) – #${order.orderNumber}`,
-          html,
-          attachments: [
-            {
-              filename: `Invoice-${order.orderNumber}.pdf`,
-              path: invoiceData.url,
-            },
-          ],
-        });
-
-        console.log("✅ COD email sent");
-      } catch (err) {
-        console.error("❌ Post-order async task failed:", err);
-      }
-    });
+    await queueInvoiceEmail(order._id);
 
   } catch (err) {
     console.error("❌ COD order failed:", err);
@@ -1298,6 +1150,35 @@ router.get('/my', protect, async (req, res) => {
   }
 });
 
+router.get('/:id/invoice', protect, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('user', 'name email firstName lastName');
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    const isOwner = order.user._id.toString() === req.user._id.toString();
+    const isStaff = ['admin', 'manager', 'support'].includes(req.user.role);
+
+    if (!isOwner && !isStaff) {
+      return res.status(401).json({ success: false, message: 'Not authorized' });
+    }
+
+    const pdfBuffer = await generateInvoicePDF(order, order.user);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Invoice-${order.orderNumber}.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Invoice download failed:', error);
+    return res.status(500).json({ success: false, message: 'Invoice unavailable' });
+  }
+});
+
 
 router.get('/:id', protect, async (req, res) => {
   try {
@@ -1322,6 +1203,11 @@ router.get('/:id', protect, async (req, res) => {
 
 
 router.put('/:id/pay', protect, async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: 'Manual payment updates are disabled. Use Razorpay verification.',
+  });
+
   try {
     const order = await Order.findById(req.params.id);
 
@@ -1351,7 +1237,7 @@ router.put('/:id/pay', protect, async (req, res) => {
     const updatedOrder = await order.save();
 
     res.status(200).json({
-      success: true, 
+      success: true,
       message: 'Order updated to paid',
       order: updatedOrder
     });
@@ -1500,7 +1386,7 @@ router.get('/', protect, authorize('admin', 'manager', 'support'), async (req, r
    ============================================================ */
 
 router.put('/:id/status', protect, authorize('admin', 'manager', 'support'), [
- body('status').isIn(['confirmed', 'shipped', 'delivered'])
+  body('status').isIn(['confirmed', 'shipped', 'delivered'])
 ], async (req, res) => {
   try {
     const { status, trackingNumber } = req.body;
