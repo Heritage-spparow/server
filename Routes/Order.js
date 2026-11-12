@@ -4,7 +4,7 @@ const Order = require('../Models/Order');
 const User = require('../Models/User');
 const Product = require('../Models/Product');
 const Cart = require('../Models/Cart');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, protectWithGuest, authorize } = require('../middleware/auth');
 const { body, validationResult } = require('express-validator');
 const { emailQueue } = require('../queues/emailQueue');
 const PDFDocument = require('pdfkit');
@@ -40,15 +40,14 @@ async function queueInvoiceEmail(orderId) {
 }
 
 
-// ⭐ RAZORPAY IMPORTS
-const Razorpay = require("razorpay");
+// ⭐ RAZORPAY (test / live chosen by RAZORPAY_MODE, see config/razorpay.js)
 const crypto = require("crypto");
-
-// ⭐ Razorpay Instance
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY,
-  key_secret: process.env.RAZORPAY_SECRET,
-});
+const {
+  razorpay,
+  keyId: RAZORPAY_KEY_ID,
+  keySecret: RAZORPAY_KEY_SECRET,
+  isConfigured: razorpayConfigured,
+} = require("../config/razorpay");
 
 const fs = require("fs");
 
@@ -57,8 +56,15 @@ const fs = require("fs");
 //   fs.existsSync(path.join(__dirname, "../templates/invoiceTemplate.ejs")),
 
 // );
-router.post("/razorpay", protect, async (req, res) => {
+router.post("/razorpay", protectWithGuest, async (req, res) => {
   try {
+    if (!razorpayConfigured) {
+      return res.status(503).json({
+        success: false,
+        message: "Payments are not configured",
+      });
+    }
+
     const {
       orderItems,
       shippingAddress,
@@ -84,6 +90,27 @@ router.post("/razorpay", protect, async (req, res) => {
         success: false,
         message: "Shipping address is required",
       });
+    }
+
+    const addressPhone = String(shippingAddress.phone || "").trim();
+
+    if (!/^\+?[\d\s-]{10,15}$/.test(addressPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid phone number is required in the shipping address",
+      });
+    }
+
+    // Guest accounts only have an email; take phone (and name) from the address
+    if (req.user.isGuest) {
+      if (req.user.phone !== addressPhone) req.user.phone = addressPhone;
+      if (req.user.firstName === "Guest" && shippingAddress.firstName) {
+        req.user.firstName = String(shippingAddress.firstName).trim().slice(0, 50);
+      }
+      if (req.user.lastName === "User" && shippingAddress.lastName) {
+        req.user.lastName = String(shippingAddress.lastName).trim().slice(0, 50);
+      }
+      if (req.user.isModified()) await req.user.save();
     }
 
     // =====================================================
@@ -259,7 +286,7 @@ router.post("/razorpay", protect, async (req, res) => {
       success: true,
 
       key:
-        process.env.RAZORPAY_KEY,
+        RAZORPAY_KEY_ID,
 
       order:
         razorpayOrder,
@@ -341,7 +368,7 @@ router.post("/capture", protect, async (req, res) => {
 
     /* 🔐 VERIFY SIGNATURE */
     const expectedSignature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_SECRET)
+      .createHmac("sha256", RAZORPAY_KEY_SECRET)
       .update(`${razorpayOrderId}|${paymentId}`)
       .digest("hex");
 
@@ -428,7 +455,14 @@ router.post("/capture", protect, async (req, res) => {
 // @route   POST /api/orders/razorpay/verify
 // @desc    Verify Razorpay payment and create order
 // @access  Private
-router.post("/razorpay/verify", protect, async (req, res) => {
+router.post("/razorpay/verify", protectWithGuest, async (req, res) => {
+  if (!razorpayConfigured) {
+    return res.status(503).json({
+      success: false,
+      message: "Payments are not configured",
+    });
+  }
+
   const session = await mongoose.startSession();
 
   try {
@@ -460,7 +494,7 @@ router.post("/razorpay/verify", protect, async (req, res) => {
     const generatedSignature = crypto
       .createHmac(
         "sha256",
-        process.env.RAZORPAY_SECRET
+        RAZORPAY_KEY_SECRET
       )
       .update(
         `${razorpay_order_id}|${razorpay_payment_id}`

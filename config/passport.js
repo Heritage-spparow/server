@@ -22,7 +22,16 @@ passport.use(
         let user = await User.findOne({ email });
 
         if (user) {
-          if (!user.googleId) {
+          if (user.isGuest) {
+            // Guest checkout account → becomes a full Google account
+            user.isGuest = false;
+            user.googleId = profile.id;
+            user.authProvider = 'google';
+            user.isVerified = true;
+            if (profile.name?.givenName) user.firstName = profile.name.givenName;
+            if (profile.name?.familyName) user.lastName = profile.name.familyName;
+            await user.save();
+          } else if (!user.googleId) {
             user.googleId = profile.id;
             user.authProvider = 'google';
             user.isVerified = true;

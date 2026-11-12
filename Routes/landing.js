@@ -14,17 +14,17 @@ router.get("/", async (req, res) => {
     const redis = getRedis();
     const cacheKey = "landing:active";
 
-    if (redis) {
-      const cached = await redis.get(cacheKey);
+    // if (redis) {
+    //   const cached = await redis.get(cacheKey);
 
-      if (cached) {
-        return res.json({
-          success: true,
-          landing: JSON.parse(cached),
-          cached: true,
-        });
-      }
-    }
+    //   if (cached) {
+    //     return res.json({
+    //       success: true,
+    //       landing: JSON.parse(cached),
+    //       cached: true,
+    //     });
+    //   }
+    // }
 
     const landing = await LandingPage.findOne({ active: true })
       .populate(

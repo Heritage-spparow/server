@@ -6,6 +6,7 @@ const Coupon = require("../Models/Coupon");
 const Product = require("../Models/Product");
 const {
   protect,
+  protectWithGuest,
   authorize,
 } = require("../middleware/auth");
 
@@ -75,7 +76,7 @@ router.get(
 
 router.post(
   "/apply",
-  protect,
+  protectWithGuest,
   async (req, res) => {
     try {
       const {
@@ -247,7 +248,7 @@ router.post(
 
 router.post(
   "/automatic",
-  protect,
+  protectWithGuest,
   async (req, res) => {
     try {
       const { calculateCart, calculateAutomaticDiscount } = require("../utils/pricing");
