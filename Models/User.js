@@ -74,8 +74,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     minlength: 6,
     required: function () {
-      return this.authProvider === 'local';
+      return this.authProvider === 'local' && !this.isGuest;
     }
+  },
+  // Guest accounts are created at checkout with only email/phone.
+  // They become normal accounts when the person signs up / logs in with Google.
+  isGuest: {
+    type: Boolean,
+    default: false,
+    index: true
   },
   authProvider: {
     type: String,
@@ -94,7 +101,8 @@ const userSchema = new mongoose.Schema({
   },
   phone: {
     type: String,
-    trim: true
+    trim: true,
+    index: true
   },
   dateOfBirth: {
     type: Date
@@ -202,7 +210,15 @@ userSchema.methods.getSignedJwtToken = function () {
   });
 };
 
+// Limited token for guest checkout: only accepted by cart / checkout routes
+userSchema.methods.getSignedGuestToken = function () {
+  return jwt.sign({ id: this._id, scope: 'guest' }, process.env.JWT_SECRET, {
+    expiresIn: process.env.GUEST_JWT_EXPIRE || '30d'
+  });
+};
+
 userSchema.methods.matchPassword = async function (enteredPassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

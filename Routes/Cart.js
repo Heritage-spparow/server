@@ -3,7 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Cart = require('../Models/Cart');
 const Product = require('../Models/Product');
-const { protect } = require('../middleware/auth');
+const { protectWithGuest: protect } = require('../middleware/auth'); // logged-in users + guest checkout
 
 // @desc    Get user cart
 // @route   GET /api/cart
@@ -38,14 +38,16 @@ router.get('/', protect, async (req, res) => {
 
 router.post("/add", protect, async (req, res) => {
   try {
-    const { productId, size, quantity = 1 } = req.body;
+    const { productId, mode } = req.body;
+    const size = req.body.size != null ? String(req.body.size) : "";
+    const quantity = Number(req.body.quantity ?? 1);
 
     // Validation
     if (!productId || !size) {
       return res.status(400).json({ success: false, message: "Product and size are required" });
     }
 
-    if (quantity < 1) {
+    if (!Number.isInteger(quantity) || quantity < 1) {
       return res.status(400).json({ success: false, message: "Quantity must be at least 1" });
     }
 
@@ -68,11 +70,13 @@ router.post("/add", protect, async (req, res) => {
 
     // Check for existing item
     const existingItem = cart.items.find(item =>
-      item.product.toString() === productId && item.size === size
+      item.product.toString() === String(productId) && String(item.size) === size
     );
 
+    // mode "set" → the quantity picked on the product page replaces the cart quantity
+    // (so 2 → back → 2 again stays 2). Default keeps the old "add on top" behaviour.
     if (existingItem) {
-      existingItem.quantity += quantity;
+      existingItem.quantity = mode === "set" ? quantity : existingItem.quantity + quantity;
     } else {
       cart.items.push({ product: productId, size, quantity });
     }

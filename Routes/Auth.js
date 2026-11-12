@@ -4,6 +4,82 @@ const { body, validationResult } = require('express-validator');
 const User = require('../Models/User');
 const { protect, authorize } = require('../middleware/auth');
 const passport = require('passport');
+const rateLimit = require('express-rate-limit');
+
+// =====================================================
+// GUEST CHECKOUT HELPERS
+// =====================================================
+
+const guestCookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  path: '/',
+};
+
+const normalizePhone = (phone) => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  // Compare on the last 10 digits so "+91 98765 43210" and "9876543210" match
+  return digits.length >= 10 ? digits.slice(-10) : '';
+};
+
+const findUserByPhone = (phone10, extra = {}) =>
+  User.findOne({ phone: { $regex: `${phone10}$` }, ...extra }).sort({ isGuest: 1, createdAt: 1 });
+
+const guestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please try again later' },
+});
+
+// @desc    Continue as guest with email. Reuses existing user, else creates a guest user.
+//          Phone is taken later from the shipping address at checkout.
+// @route   POST /api/auth/guest
+// @access  Public
+router.post('/guest', guestLimiter, [
+  body('email').isEmail().withMessage('Please provide a valid email').normalizeEmail({ gmail_remove_dots: false }),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const { email } = req.body;
+
+    let user = await User.findOne({ email });
+
+    if (user && user.accountStatus !== 'active') {
+      return res.status(403).json({ success: false, message: 'Account is suspended or closed' });
+    }
+
+    if (!user) {
+      user = await User.create({
+        firstName: 'Guest',
+        lastName: 'User',
+        email,
+        isGuest: true,
+        authProvider: 'local',
+      });
+    }
+
+    const guestToken = user.getSignedGuestToken();
+
+    res
+      .status(200)
+      .cookie('guest_token', guestToken, { ...guestCookieOptions, maxAge: 30 * 24 * 60 * 60 * 1000 })
+      .json({
+        success: true,
+        guestToken,
+        guest: { isGuest: true, email },
+      });
+  } catch (error) {
+    console.error('Guest checkout error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -28,21 +104,41 @@ router.post('/register', [
 
     // Check if user exists
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    if (existingUser && !existingUser.isGuest) {
       return res.status(400).json({
         success: false,
         message: 'User already exists'
       });
     }
 
-    // Create user
-    const user = await User.create({
-      firstName,
-      lastName,
-      email,
-      password,
-      phone
-    });
+    // A guest account (same email, or same phone) becomes this user's account,
+    // so their guest orders / cart stay with them.
+    let guestUser = existingUser;
+    const phone10 = normalizePhone(phone);
+    if (!guestUser && phone10) {
+      guestUser = await findUserByPhone(phone10, { isGuest: true });
+    }
+
+    let user;
+    if (guestUser) {
+      guestUser.firstName = firstName;
+      guestUser.lastName = lastName;
+      guestUser.email = email;
+      guestUser.password = password;
+      if (phone) guestUser.phone = phone;
+      guestUser.isGuest = false;
+      guestUser.authProvider = 'local';
+      user = await guestUser.save();
+    } else {
+      // Create user
+      user = await User.create({
+        firstName,
+        lastName,
+        email,
+        password,
+        phone
+      });
+    }
 
     // Generate token
     const token = user.getSignedJwtToken();
@@ -66,6 +162,7 @@ router.post('/register', [
 
     res.status(201)
       .cookie('token', token, cookieOptions)
+      .clearCookie('guest_token', guestCookieOptions)
       .json({
         success: true,
         token,
@@ -97,6 +194,7 @@ router.post('/login', [
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
   try {
+   
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({
@@ -106,13 +204,23 @@ router.post('/login', [
     }
 
     const { email, password } = req.body;
-
     // Check for user
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
+      });
+    }
+
+    // Guest account has no password yet → ask them to sign up with the same email
+    if (user.isGuest || !user.password) {
+      return res.status(401).json({
+        success: false,
+        code: user.isGuest ? 'GUEST_ACCOUNT' : 'NO_PASSWORD',
+        message: user.isGuest
+          ? 'Please sign up with this email to access your orders'
+          : 'Please login with Google'
       });
     }
 
@@ -169,6 +277,7 @@ router.post('/login', [
     res
       .status(200)
       .cookie("token", token, cookieOptions)
+      .clearCookie("guest_token", guestCookieOptions)
       .json({
         success: true,
         token,
@@ -203,6 +312,7 @@ router.post('/logout', (req, res) => {
     expires: new Date(Date.now() + 10 * 1000),
     httpOnly: true
   });
+  res.clearCookie('guest_token', guestCookieOptions);
 
   res.status(200).json({
     success: true,
